@@ -8,3 +8,4 @@ models/*.pth
 .env
 .idea/
 .vscode/
+node_modules/
