@@ -54,7 +54,8 @@ LIMITATIONS = [
     "Evaluation cases come from the Medical Segmentation Decathlon Task01, which derives from BraTS 2016/2017; most "
     "are likely included in the model's BraTS 2018 training data, so reported Dice/sensitivity are optimistic.",
     "Enhancing tumour (ET) and necrotic core (NCR) are small, low-contrast regions and are the least reliable; "
-    "ET can be missed entirely or predicted where an expert would mark none.",
+    "ET can be missed entirely or predicted where an expert would mark none (in our evaluation, non-enhancing "
+    "tumours such as BRATS_175 and BRATS_169 received spurious ET/TC predictions).",
     "Images coarser than 1 mm are resampled to 1 mm; thick-slice data reduces accuracy and volume precision.",
     "Volumes are estimates (voxel count x voxel volume) of the model's predicted regions, not measurements of "
     "the tumour, and inherit all segmentation errors.",

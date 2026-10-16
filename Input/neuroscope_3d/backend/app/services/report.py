@@ -5,6 +5,7 @@ import datetime
 import html
 import io
 import json
+import textwrap
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -253,7 +254,7 @@ def render_pdf(study: ValidatedStudy) -> bytes:
     ss = getSampleStyleSheet()
     body = ParagraphStyle("b", parent=ss["BodyText"], fontSize=8.5, leading=11)
     small = ParagraphStyle("s", parent=body, fontSize=7, leading=9)
-    h2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=11, spaceBefore=8, spaceAfter=4)
+    h2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=11, spaceBefore=8, spaceAfter=4, keepWithNext=1)
     disc = ParagraphStyle("d", parent=body, textColor=colors.HexColor("#7f1d1d"), backColor=colors.HexColor("#fee2e2"),
                           borderPadding=4, fontName="Helvetica-Bold")
     e = html.escape
@@ -344,8 +345,10 @@ def render_pdf(study: ValidatedStudy) -> bytes:
         canvas.saveState()
         canvas.setFont("Helvetica-Bold", 7)
         canvas.setFillColor(colors.HexColor("#7f1d1d"))
-        canvas.drawCentredString(A4[0] / 2, 8 * mm, DISCLAIMER[:150])
-        canvas.drawCentredString(A4[0] / 2, 5 * mm, DISCLAIMER[150:] + f"   Page {doc.page}")
+        lines = textwrap.wrap(DISCLAIMER, 150)
+        line1, line2 = lines[0], " ".join(lines[1:])
+        canvas.drawCentredString(A4[0] / 2, 8 * mm, line1)
+        canvas.drawCentredString(A4[0] / 2, 5 * mm, f"{line2}   Page {doc.page}")
         canvas.restoreState()
 
     buf = io.BytesIO()
