@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NeuroScope 3D Viewer</title>
+  <link rel="stylesheet" href="/static/base.css">
+  <link rel="stylesheet" href="/static/viewer.css">
+  <script type="importmap">{ "imports": { "three": "/static/vendor/three.module.js" } }</script>
+</head>
+<body>
+  <div class="safety" role="note">
+    <span>Research &amp; teaching prototype</span><span>Suspected regions predicted by the model</span><span>Not a diagnosis</span><span>Not clinically validated</span>
+  </div>
+  <header class="nav dark">
+    <a class="wordmark" href="/">Neuro<em>scope</em><sup>3D</sup></a>
+    <ul>
+      <li><a id="lnk-report" target="_blank">Report</a></li>
+      <li><a id="lnk-pdf" target="_blank">PDF</a></li>
+      <li><a id="lnk-nifti">Label map</a></li>
+      <li><a href="/#analyse">New study</a></li>
+    </ul>
+    <span id="study" class="study"></span>
+  </header>
+  <div class="backup" id="backup" hidden></div>
+  <div class="warnings" id="warnings" hidden></div>
+  <div class="status" id="status">Loading study…</div>
+
+  <main class="layout">
+    <section class="views">
+      <div class="panel" id="panel-3d">
+        <div class="ptitle">3D (world mm) <span class="hint">drag rotate · wheel zoom · right-drag pan · click surface to set crosshair</span></div>
+        <div class="canvas3d" id="view3d"></div>
+        <button class="small" id="reset-cam">Reset view</button>
+      </div>
+      <div class="panel slice" data-view="axial"><div class="ptitle">Axial <span class="idx"></span></div><div class="sbox"></div></div>
+      <div class="panel slice" data-view="coronal"><div class="ptitle">Coronal <span class="idx"></span></div><div class="sbox"></div></div>
+      <div class="panel slice" data-view="sagittal"><div class="ptitle">Sagittal <span class="idx"></span></div><div class="sbox"></div></div>
+    </section>
+
+    <aside class="side">
+      <div class="card">
+        <h2>Crosshair</h2>
+        <table class="kv">
+          <tr><td>Voxel (uploaded grid)</td><td id="c-vox" class="mono"></td></tr>
+          <tr><td>World (mm)</td><td id="c-world" class="mono"></td></tr>
+          <tr><td>Model label</td><td id="c-pred"></td></tr>
+          <tr id="c-expert-row" hidden><td>Expert label</td><td id="c-expert"></td></tr>
+          <tr><td>Intensity</td><td id="c-int" class="mono"></td></tr>
+        </table>
+        <button class="small" id="goto-lesion">Centre on predicted region</button>
+      </div>
+
+      <div class="card">
+        <h2>3D layers</h2>
+        <div id="layers"></div>
+      </div>
+
+      <div class="card">
+        <h2>Slices</h2>
+        <label class="row">Background
+          <select id="bg-seq"><option value="flair">FLAIR</option><option value="t1gd">T1Gd</option><option value="t1">T1</option><option value="t2">T2</option></select>
+        </label>
+        <label class="row">Overlay
+          <select id="overlay">
+            <option value="pred">Model prediction</option>
+            <option value="expert" disabled>Expert mask</option>
+            <option value="agree-WT" disabled>Agreement — WT</option>
+            <option value="agree-TC" disabled>Agreement — TC</option>
+            <option value="agree-ET" disabled>Agreement — ET</option>
+            <option value="uncert" disabled>Uncertainty (TTA, WT)</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <label class="row">Overlay opacity <input type="range" id="ov-alpha" min="0" max="1" step="0.05" value="0.5"></label>
+        <div class="row labels" id="label-toggles">
+          <label><input type="checkbox" data-code="1" checked><i style="background:#d6452c"></i>NCR 1</label>
+          <label><input type="checkbox" data-code="2" checked><i style="background:#78a870"></i>ED 2</label>
+          <label><input type="checkbox" data-code="4" checked><i style="background:#e8b030"></i>ET 4</label>
+        </div>
+        <div class="legend" id="agree-legend" hidden>
+          <span><i style="background:#78a870"></i>both</span><span><i style="background:#d6452c"></i>model only</span><span><i style="background:#6fa3b5"></i>expert only</span>
+        </div>
+        <div class="legend" id="uncert-legend" hidden>
+          <span><i style="background:#78a870"></i>4/4</span><span><i style="background:#e2d6a0"></i>3/4</span><span><i style="background:#e8b030"></i>2/4</span><span><i style="background:#d6452c"></i>1/4 passes call it WT</span>
+        </div>
+      </div>
+
+      <div class="card" id="trust-card">
+        <h2>How much to trust it</h2>
+        <div id="trust" class="small"></div>
+        <button class="small" id="run-ablation">Run modality ablation</button>
+        <div id="ablation" class="small"></div>
+      </div>
+
+      <div class="card">
+        <h2>Expert mask (optional)</h2>
+        <p class="muted small">NIfTI on the same grid, BraTS codes 0/1/2/4. Shown next to the model's prediction.</p>
+        <input type="file" id="expert-file" accept=".nii,.gz">
+        <div id="expert-msg" class="small"></div>
+      </div>
+    </aside>
+  </main>
+
+  <section class="card wide">
+    <h2>Estimated volumes</h2>
+    <p id="formula" class="formula"></p>
+    <div class="tablewrap"><table id="vol-table" class="grid"></table></div>
+    <div id="agreement"></div>
+  </section>
+
+  <footer class="foot"><span id="disclaimer">Research and teaching prototype. Outputs are suspected tumour regions predicted by the model and estimated volumes. Not a diagnosis; not clinically validated; not for clinical use.</span> Use only public, de-identified research data. Uploads are deleted automatically within 24 hours.</footer>
+
+  <script type="module" src="/static/viewer.js"></script>
+</body>
+</html>

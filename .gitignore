@@ -3,8 +3,14 @@ __pycache__/
 *.py[cod]
 data/
 outputs/
-models/*.pt
-models/*.pth
+dataset/
+models/**/*.pt
+models/**/*.pth
+models/**/*.ts
+._*
 .env
 .idea/
 .vscode/
+node_modules/
+demo_cases/
+backup_case/

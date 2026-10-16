@@ -1,0 +1,333 @@
+// Landing + analysis workflow. One drop zone: a single 4-channel NIfTI, or four sequence files (+ optional mask).
+const $ = (s, el = document) => el.querySelector(s);
+const SEQS = ['T1', 'T1Gd', 'T2', 'FLAIR'];
+const DECATHLON_ORDER = ['FLAIR', 'T1', 'T1Gd', 'T2'];
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtMB = (b) => (b / 1048576).toFixed(b < 1048576 * 10 ? 2 : 1) + ' MB';
+
+// ------------------------------------------------------------------ about: status, figures, evaluation, limits
+async function loadAbout() {
+  try {
+    const a = await (await fetch('/api/about')).json();
+    $('#status').innerHTML = `<i class="dot ${a.cuda ? 'on' : ''}"></i>${a.cuda ? 'GPU ready' : 'CPU only'} · ${esc(a.device)}`;
+    $('#disclaimer-full').textContent = a.disclaimer;
+    const ev = a.evaluation;
+    if (ev) {
+      $('#fig-wt').textContent = ev.summary.WT.dice_mean.toFixed(3);
+      $('#fig-wt-note').textContent = `mean, ${ev.n_cases} held-out cases*`;
+      $('#eval-intro').textContent = `${ev.n_cases} held-out labelled cases, sampled at random with a fixed seed. One study per patient. We did no training or tuning.`;
+      const rows = ['WT', 'TC', 'ET'].map((r) => {
+        const s = ev.summary[r];
+        const name = { WT: 'Whole tumour', TC: 'Tumour core', ET: 'Enhancing' }[r];
+        return `<tr><td><b>${r}</b><br><span class="small" style="font-family:var(--sans);color:var(--ink-3)">${name}</span></td>
+          <td class="big">${s.dice_mean.toFixed(3)}<span class="sd">±${s.dice_sd.toFixed(2)}</span></td>
+          <td><div class="bar"><i style="width:${(s.dice_mean * 100).toFixed(1)}%"></i></div></td>
+          <td>${s.sensitivity_mean === null ? '—' : s.sensitivity_mean.toFixed(3)}</td>
+          <td>${s.hd95_median_mm === null ? '—' : s.hd95_median_mm.toFixed(1) + ' mm'}</td></tr>`;
+      }).join('');
+      $('#eval-table').innerHTML = `<thead><tr><th>Region</th><th>Dice</th><th></th><th>Sensitivity</th><th>HD95 median</th></tr></thead><tbody>${rows}</tbody>`;
+      $('#eval-disclosure').textContent = '* ' + ev.overlap_disclosure;
+      $('#eval-cases').textContent = ev.case_ids.join('  ');
+    } else {
+      $('#eval-table').innerHTML = '<tbody><tr><td>Evaluation has not been run yet (python scripts/evaluate.py).</td></tr></tbody>';
+    }
+    $('#limits-list').innerHTML = a.limitations.map((l) => `<li>${esc(l)}</li>`).join('');
+  } catch {
+    $('#status').innerHTML = '<i class="dot"></i>server unreachable';
+  }
+}
+
+// ------------------------------------------------------------------ hero plate: axial sweep
+async function startPlate() {
+  const canvas = $('#plate');
+  let meta;
+  try { meta = await (await fetch('/static/hero/plate.json')).json(); } catch { return; }
+  const img = new Image();
+  img.src = '/static/hero/plate.jpg';
+  await img.decode().catch(() => null);
+  if (!img.naturalWidth) return;
+  const W = meta.frame_width, H = meta.frame_height, n = meta.frames.length;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const read = $('#plate-read'), frame = $('.plate-frame');
+  $('#plate-case').textContent = meta.case.split(' · ')[0];
+  const draw = (i) => {
+    ctx.drawImage(img, 0, i * H, W, H, 0, 0, W, H);
+    const f = meta.frames[i];
+    const area = (Number(f.area_mm2['1']) + Number(f.area_mm2['2']) + Number(f.area_mm2['4'])) / 100;
+    read.innerHTML = `z ${f.z_mm.toFixed(0).padStart(4, ' ')} mm<br>WT ${area.toFixed(1)} cm² in slice<br>` +
+      `<span style="opacity:.7">case WT ${meta.volumes_mL.WT} mL</span>`;
+    frame.style.setProperty('--scan', `${(1 - i / (n - 1)) * 100}%`);
+  };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { draw(Math.floor(n / 2)); return; }
+  let i = 0, dir = 1, last = 0, pause = 0;
+  const tick = (t) => {
+    requestAnimationFrame(tick);
+    if (t - last < 90 || t < pause) return;
+    last = t; draw(i);
+    i += dir;
+    if (i === n - 1 || i === 0) { dir = -dir; pause = t + 700; }
+  };
+  requestAnimationFrame(tick);
+}
+
+// ------------------------------------------------------------------ NIfTI header (client-side preview only; the server decides)
+async function readHeader(file) {
+  let bytes;
+  if (/\.gz$/i.test(file.name)) {
+    const reader = file.stream().pipeThrough(new DecompressionStream('gzip')).getReader();
+    const chunks = []; let size = 0;
+    try {
+      while (size < 560) { const { value, done } = await reader.read(); if (done) break; chunks.push(value); size += value.length; }
+    } catch { return { error: 'not a valid gzip file' }; }
+    reader.cancel().catch(() => {});
+    bytes = new Uint8Array(size); let o = 0; for (const c of chunks) { bytes.set(c, o); o += c.length; }
+  } else {
+    bytes = new Uint8Array(await file.slice(0, 560).arrayBuffer());
+  }
+  if (bytes.length < 348) return { error: 'too short to be NIfTI' };
+  const dv = new DataView(bytes.buffer);
+  for (const le of [true, false]) {
+    const sz = dv.getInt32(0, le);
+    if (sz === 348) {
+      const nd = dv.getInt16(40, le), dim = [1, 2, 3, 4].map((k) => dv.getInt16(40 + 2 * k, le));
+      const pix = [1, 2, 3].map((k) => dv.getFloat32(76 + 4 * k, le));
+      return { ndim: nd, dim: dim.slice(0, nd), pix };
+    }
+    if (sz === 540 && bytes.length >= 540) {
+      const nd = Number(dv.getBigInt64(16, le)), dim = [1, 2, 3, 4].map((k) => Number(dv.getBigInt64(16 + 8 * k, le)));
+      const pix = [1, 2, 3].map((k) => dv.getFloat64(104 + 8 * k, le));
+      return { ndim: nd, dim: dim.slice(0, nd), pix };
+    }
+  }
+  return { error: 'no NIfTI header found' };
+}
+
+// Same token rules as the server's modality detector
+function detectRole(name) {
+  const n = name.replace(/\.nii(\.gz)?$/i, '').replace(/\.gz$/i, '');
+  const b = (re) => new RegExp(`(?:^|[_\\-.\\s])(${re})(?:$|[_\\-.\\s])`, 'i').test(n);
+  if (b('seg|label|labels|mask|gt|expert')) return 'expert';
+  if (b('t1(?:ce|gd|c|post|\\+c|\\+gd|-ce|-gd|-post|_ce|_gd|_post)')) return 'T1Gd';
+  if (b('t2[-_]?flair|flair')) return 'FLAIR';
+  if (b('t2(?:w|_w|-w|weighted|_weighted)?')) return 'T2';
+  if (b('t1(?:w|_w|-w|weighted|_weighted)?')) return 'T1';
+  return '';
+}
+
+// ------------------------------------------------------------------ manifest
+const state = { items: [], order: [...DECATHLON_ORDER], busy: false };
+
+async function addFiles(fileList) {
+  for (const f of fileList) {
+    if (state.items.some((it) => it.file.name === f.name && it.file.size === f.size)) continue;
+    const head = await readHeader(f);
+    const is4 = head.ndim === 4 && head.dim[3] === 4;
+    state.items.push({ file: f, head, role: is4 ? 'study4d' : detectRole(f.name) });
+  }
+  render();
+}
+
+function plan() {
+  const live = state.items.filter((it) => it.role && it.role !== 'ignore');
+  const four = live.filter((it) => it.role === 'study4d');
+  const seqs = live.filter((it) => SEQS.includes(it.role));
+  const experts = live.filter((it) => it.role === 'expert');
+  const problems = [];
+  for (const it of live) {
+    const n = `“${it.file.name}”`, h = it.head;
+    if (it.file.size > 1024 ** 3) problems.push(`${n} is larger than 1 GB.`);
+    else if (h.error) problems.push(`${n} cannot be read as NIfTI (${h.error}).`);
+    else if (it.role !== 'study4d') {
+      const nd = h.ndim === 4 && h.dim[3] === 1 ? 3 : h.ndim;
+      if (nd !== 3) problems.push(`${n} is ${nd}D (${h.dim.join(' × ')}); each sequence must be a 3D volume.`);
+    }
+  }
+  if (state.items.some((it) => !it.role)) problems.push('Assign a sequence to every file (or mark it “ignore”).');
+  if (experts.length > 1) problems.push('Only one expert mask can be attached.');
+  if (four.length > 1) problems.push('Drop only one 4-channel study at a time.');
+  if (four.length && seqs.length) problems.push('Use either one 4-channel file or four sequence files, not both.');
+  if (four.length === 1) {
+    if (new Set(state.order).size !== 4) problems.push('Each channel must map to a different sequence.');
+    return { mode: '4d', four: four[0], expert: experts[0], problems };
+  }
+  const missing = SEQS.filter((s) => !seqs.some((it) => it.role === s));
+  const dupes = SEQS.filter((s) => seqs.filter((it) => it.role === s).length > 1);
+  if (seqs.length || !four.length) {
+    if (missing.length) problems.push(`Missing: ${missing.join(', ')}.`);
+    if (dupes.length) problems.push(`More than one file for: ${dupes.join(', ')}.`);
+  }
+  const shapes = new Set(seqs.filter((it) => it.head.dim && it.head.ndim >= 3).map((it) => it.head.dim.slice(0, 3).join('×')));
+  if (shapes.size > 1) problems.push(`The sequences have different grids (${[...shapes].join(' vs ')}); they must be co-registered.`);
+  return { mode: '4files', seqs, expert: experts[0], problems };
+}
+
+function render() {
+  const m = $('#manifest'), has = state.items.length > 0;
+  m.hidden = !has; $('#clear').hidden = !has;
+  if (!has) { $('#run').disabled = true; $('#hint').hidden = true; return; }
+  const roleOpts = (cur, is4) => (is4 ? ['study4d', 'ignore'] : [...SEQS, 'expert', 'ignore'])
+    .map((r) => `<option value="${r}" ${r === cur ? 'selected' : ''}>${{ study4d: '4-channel study', expert: 'Expert mask', ignore: 'ignore' }[r] || r}</option>`).join('');
+  const rows = state.items.map((it, k) => {
+    const h = it.head, is4 = h.ndim === 4 && h.dim[3] === 4;
+    const geom = h.error ? `<span class="bad">${esc(h.error)}</span>`
+      : `${h.dim.join(' × ')}${h.pix ? ` &nbsp;·&nbsp; ${h.pix.map((p) => p.toFixed(2)).join(' × ')} mm` : ''}`;
+    return `<tr><td><select data-k="${k}" aria-label="Role of ${esc(it.file.name)}">
+        ${it.role ? '' : '<option value="" selected>choose…</option>'}${roleOpts(it.role, is4)}</select></td>
+      <td>${esc(it.file.name)}</td><td class="mono">${geom}</td><td class="mono">${fmtMB(it.file.size)}</td></tr>`;
+  }).join('');
+  const p = plan();
+  let channels = '';
+  if (p.mode === '4d') {
+    channels = `<p class="hint" style="margin-top:16px">Which sequence is in each channel? Defaults follow the Medical Segmentation Decathlon (FLAIR, T1, T1Gd, T2).</p>
+      <div class="channels">${[0, 1, 2, 3].map((c) => `<label>CHANNEL ${c}<select data-ch="${c}">${SEQS.map((s) =>
+        `<option ${state.order[c] === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>`).join('')}</div>`;
+  }
+  m.innerHTML = `<table><thead><tr><th>Role</th><th>File</th><th>Grid &amp; spacing (header)</th><th>Size</th></tr></thead><tbody>${rows}</tbody></table>${channels}`;
+  m.querySelectorAll('select[data-k]').forEach((s) => s.addEventListener('change', () => { state.items[+s.dataset.k].role = s.value; render(); }));
+  m.querySelectorAll('select[data-ch]').forEach((s) => s.addEventListener('change', () => { state.order[+s.dataset.ch] = s.value; render(); }));
+
+  const hint = $('#hint');
+  hint.hidden = false;
+  hint.innerHTML = p.problems.length ? `<span class="bad">${p.problems.map(esc).join(' ')}</span>`
+    : p.mode === '4d' ? `Ready: one 4-channel study${p.expert ? ' + expert mask' : ''}. It will be split into four sequences on the server.`
+      : `Ready: T1, T1Gd, T2 and FLAIR${p.expert ? ' + expert mask' : ''}.`;
+  $('#run').disabled = p.problems.length > 0 || state.busy;
+}
+
+// ------------------------------------------------------------------ run
+const steps = {};
+document.querySelectorAll('#steps li').forEach((li) => { steps[li.dataset.step] = li; });
+function step(name, cls, text = '') {
+  const li = steps[name]; li.className = cls; li.querySelector('time').textContent = text;
+}
+const secs = (t0) => ((performance.now() - t0) / 1000).toFixed(1) + ' s';
+
+function upload(url, form, onProgress) {
+  return new Promise((resolve) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', url);
+    x.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    x.upload.onload = () => onProgress(1);
+    x.onload = () => { let body = {}; try { body = JSON.parse(x.responseText); } catch {} resolve({ ok: x.status < 300, status: x.status, body }); };
+    x.onerror = () => resolve({ ok: false, status: 0, body: { message: 'Network error — is the server running?' } });
+    x.send(form);
+  });
+}
+
+function showError(code, msg) {
+  const e = $('#error'); e.hidden = false;
+  e.innerHTML = `<b>${esc(code || 'ERROR')}</b>${esc(msg || 'Something went wrong.')}`;
+}
+
+async function run() {
+  const p = plan();
+  if (p.problems.length) return;
+  state.busy = true; render();
+  $('#error').hidden = true; $('#result').hidden = true;
+  Object.keys(steps).forEach((k) => step(k, ''));
+
+  const form = new FormData();
+  let url;
+  if (p.mode === '4d') {
+    url = '/api/upload/validate-4d';
+    form.append('file', p.four.file); form.append('channel_order', state.order.join(','));
+  } else {
+    url = '/api/upload/validate';
+    for (const it of p.seqs) form.append(it.role.toLowerCase(), it.file);
+  }
+  if (p.expert) form.append('expert', p.expert.file);
+
+  const t0 = performance.now();
+  step('upload', 'run');
+  let t1;
+  const up = await upload(url, form, (f) => {
+    if (f < 1) step('upload', 'run', `${Math.round(f * 100)}%`);
+    else if (!t1) { t1 = performance.now(); step('upload', 'ok', secs(t0)); step('checks', 'run'); }
+  });
+  if (!t1) { t1 = performance.now(); step('upload', 'ok', secs(t0)); }
+  if (!up.ok) {
+    step('checks', 'fail', 'refused');
+    showError(up.body.error_code, up.body.message);
+    state.busy = false; render(); return;
+  }
+  step('checks', 'ok', secs(t1));
+  const sid = up.body.study_id;
+
+  const t2 = performance.now();
+  step('segment', 'run');
+  const seg = await fetch('/api/segmentation/run', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ study_id: sid }),
+  });
+  const r = await seg.json().catch(() => ({}));
+  if (!seg.ok) {
+    step('segment', 'fail', 'failed');
+    showError(r.error_code || 'SEGMENTATION_FAILED', r.message);
+    state.busy = false; render(); return;
+  }
+  step('segment', 'ok', `${secs(t2)} · model ${r.provenance.inference_seconds}s`);
+
+  const t3 = performance.now();
+  step('finish', 'run');
+  const [meta] = await Promise.all([
+    fetch(`/api/viewer/${sid}/meta`).then((x) => x.json()),
+    fetch(`/api/viewer/${sid}/meshes`).then((x) => x.ok), // warm the surface cache so the viewer opens instantly
+  ]);
+  step('finish', 'ok', `${secs(t3)} · total ${secs(t0)}`);
+  showResult(sid, r, meta, up.body);
+  state.busy = false; render();
+}
+
+function showResult(sid, r, meta, up) {
+  const v = r.estimated_volumes, el = $('#result');
+  const cell = (k, label, sw, major) => `<div class="${major ? 'major' : ''}"><div class="k">${sw ? `<i class="swatch ${sw}"></i>` : ''}${label}</div>
+    <div class="v">${v[k].mL.toFixed(2)}<small>mL</small></div><div class="n">${v[k].voxels.toLocaleString('en-US')} vox × ${v[k].voxel_volume_mm3.toFixed(3)} mm³</div></div>`;
+  const warn = r.warnings.length ? `<div class="warnbox"><b>Suitability warnings</b><ul>${r.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>` : '';
+  const ag = meta.agreement ? `<div class="agree"><span class="eyebrow">Agreement with your expert mask (this case)</span>
+    <table><tr><th>Region</th><th>Dice</th><th>Sensitivity</th><th>HD95</th></tr>${Object.entries(meta.agreement).map(([k, a]) =>
+      `<tr><td>${k}</td><td>${a.dice.toFixed(3)}</td><td>${a.sensitivity === null ? '—' : a.sensitivity.toFixed(3)}</td><td>${a.hd95_mm === null ? '—' : a.hd95_mm.toFixed(1) + ' mm'}</td></tr>`).join('')}</table></div>` : '';
+  const src = up.metadata.source_4d ? ` · split from ${esc(up.metadata.source_4d.file)} (${up.metadata.source_4d.channel_order.join(', ')})` : '';
+  el.innerHTML = `
+    <div class="result-head">
+      <h3>Suspected regions predicted by the model, <em>estimated volumes</em></h3>
+      <span class="mono small">study ${esc(sid)}</span>
+    </div>
+    <div class="vols">
+      ${cell('WT', 'WT · 1+2+4', '', true)}${cell('TC', 'TC · 1+4', '', true)}${cell('ET', 'ET · 4', 's-et', true)}
+      ${cell('NCR', 'NCR · 1', 's-ncr')}${cell('ED', 'ED · 2', 's-ed')}
+    </div>
+    ${warn}
+    ${r.uncertainty ? `<p class="trust"><span class="eyebrow">How much to trust it</span><br>
+      Re-run on the scan mirrored along each axis (${r.uncertainty.passes} passes), WT lands between
+      <b>${r.uncertainty.regions.WT.volume_mL_min.toFixed(1)}</b> and <b>${r.uncertainty.regions.WT.volume_mL_max.toFixed(1)} mL</b>;
+      ${(r.uncertainty.wt_uncertain_fraction * 100).toFixed(1)}% of its voxels are disputed between passes.
+      The viewer shows where, and can run a modality ablation.</p>` : ''}
+    ${ag}
+    <div class="result-actions">
+      <a class="btn" href="${r.viewer_url}">Open 3D &amp; slice viewer <span class="arr">→</span></a>
+      <a class="btn ghost" href="${r.report_url}" target="_blank">Report</a>
+      <a class="btn ghost" href="/api/report/${encodeURIComponent(sid)}.pdf" target="_blank">PDF</a>
+      <a class="btn ghost" href="${r.prediction_url}">Label map (.nii.gz)</a>
+    </div>
+    <p class="prov">${esc(r.model)} · ${esc(r.provenance.device)} · ${r.provenance.inference_seconds}s inference ·
+      grid ${r.shape.join('×')} @ ${r.spacing_mm.map((s) => s.toFixed(2)).join('×')} mm · commit ${esc(String(r.provenance.code_commit).slice(0, 7))}${src}<br>
+      V = N × Δx·Δy·Δz; mL = mm³ ÷ 1000. Not a diagnosis.</p>`;
+  el.hidden = false;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ------------------------------------------------------------------ wiring
+const drop = $('#drop'), input = $('#file-input');
+input.addEventListener('change', () => { addFiles([...input.files]); input.value = ''; });
+['dragenter', 'dragover'].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach((e) => drop.addEventListener(e, () => drop.classList.remove('over')));
+drop.addEventListener('drop', (ev) => { ev.preventDefault(); addFiles([...ev.dataTransfer.files]); });
+$('#run').addEventListener('click', run);
+$('#clear').addEventListener('click', () => {
+  state.items = []; state.order = [...DECATHLON_ORDER];
+  $('#error').hidden = true; $('#result').hidden = true;
+  Object.keys(steps).forEach((k) => step(k, '')); render();
+});
+
+loadAbout();
+startPlate();
