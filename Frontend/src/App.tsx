@@ -161,19 +161,6 @@ function NavBar({
           About & safety
         </a>
       </nav>
-
-      {/* Standout Button */}
-      <a
-        className={`header-cta standout-btn ${isViewer ? "viewer-active-btn" : ""}`}
-        href="#/viewer"
-        onClick={(e) => {
-          e.preventDefault()
-          handleNavClick("#/viewer")
-        }}
-      >
-        <span className="btn-label">Explore the viewer</span>
-        <span className="btn-glyph"><Arrow diagonal /></span>
-      </a>
     </header>
   )
 }
