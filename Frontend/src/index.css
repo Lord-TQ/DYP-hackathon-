@@ -64,7 +64,7 @@
 }
 .site-header nav {
   display: flex;
-  gap: 36px;
+  gap: clamp(42px, 4.8vw, 68px);
   align-items: center;
   justify-content: center;
   margin: 0 auto !important;
@@ -76,10 +76,11 @@
 }
 .site-header nav a {
   position: relative;
-  font-size: 13px;
+  font-size: 13.5px;
+  letter-spacing: 0.035em;
   color: var(--ink);
-  padding: 8px 0;
-  transition: color 0.2s ease;
+  padding: 10px 4px;
+  transition: color 0.22s ease;
   font-weight: 450;
   white-space: nowrap;
 }
@@ -90,11 +91,12 @@
 .site-header nav a.active::after {
   content: '';
   position: absolute;
-  bottom: 0;
+  bottom: -2px;
   left: 0;
   right: 0;
   height: 2px;
   background: var(--signal);
+  border-radius: 1px;
 }
 .viewer-nav {
   background: var(--workspace);
