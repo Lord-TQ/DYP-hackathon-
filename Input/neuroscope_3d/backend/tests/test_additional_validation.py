@@ -58,21 +58,25 @@ def make_test_nifti(
         for i in range(min(3, len(zooms))):
             affine[i, i] = zooms[i]
 
-    if is_singular:
-        affine[0, :] = 0.0
-
     img = nib.Nifti1Image(arr, affine)
+    if is_singular:
+        # Real nibabel cannot encode a singular matrix as a qform, so write it only as the sform.
+        singular = affine.copy()
+        singular[0, :] = 0.0
+        img.header.set_qform(None, code=0)
+        img.header.set_sform(singular, code=1)
+        img = nib.Nifti1Image(arr, None, img.header)
     nib.save(img, str(dest_path))
     return dest_path
 
 
 class TestAdditionalValidation:
-    def setUp(self):
+    def setup_method(self):
         self.temp_dir = Path(tempfile.mkdtemp(prefix="neuroscope_ext_tests_"))
         self.validator = NIfTIValidator()
         study_store.clear()
 
-    def tearDown(self):
+    def teardown_method(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
         study_store.clear()
 
@@ -225,10 +229,9 @@ class TestAdditionalValidation:
     def test_16_corrupt_voxel_data_with_valid_header(self):
         """Scenario 16: Corrupt voxel data following a valid header."""
         hdr = nib.Nifti1Header()
-        hdr.fields["dim"] = [3, 100, 100, 100, 1, 1, 1, 1]
-        hdr.fields["datatype"] = 16
-        hdr.fields["bitpix"] = 32
-        hdr_bytes = hdr.to_bytes()
+        hdr.set_data_shape((100, 100, 100))
+        hdr.set_data_dtype(np.float32)
+        hdr_bytes = hdr.binaryblock
         corrupt_p = self.temp_dir / "corrupt_data.nii"
         corrupt_p.write_bytes(hdr_bytes + bytes([0, 0, 0, 0]) + b"CORRUPT_VOXEL_PAYLOAD")
 

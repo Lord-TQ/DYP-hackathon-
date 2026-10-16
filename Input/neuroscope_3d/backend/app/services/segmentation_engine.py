@@ -1,25 +1,27 @@
 """
 MONAI SegResNet Brain MRI Segmentation Engine for NeuroScope 3D.
-Processes validated BraTS 2021 multi-parametric MRI sequences in protocol order:
-[T1Gd, T1, T2, FLAIR].
+Delegates inference to the shared `brainseg` pipeline (repository root), which loads the validated
+sequences in protocol order [T1Gd, T1, T2, FLAIR], restores the prediction to the input grid and
+affine, and writes a NIfTI label map in BraTS codes (1 = NCR, 2 = ED, 4 = ET).
 """
 
-import os
+import json
+import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
-import nibabel as nib
-import numpy as np
-
+import app.core.paths  # noqa: F401  (makes brainseg importable)
 from app.core.exceptions import NIfTIValidationError
-from app.models.schemas import (
-    SegmentationRunResponse,
-    TumorSubRegionMetrics,
-)
-from app.services.study_store import ValidatedStudy, study_store
+from app.services.study_store import study_store
 
-DEFAULT_WEIGHTS_PATH = Path(__file__).resolve().parent.parent / "models" / "weights" / "segresnet_brats21.pt"
+from brainseg.constants import CHECKPOINT, DISCLAIMER, MODEL_INFO, MODEL_INPUT_ORDER
+
 PROTOCOL_CHANNEL_ORDER = ["T1Gd", "T1", "T2", "FLAIR"]
+# Upload module modality names -> shared brainseg sequence names
+MODALITY_TO_SEQUENCE = {"T1": "t1", "T1Gd": "t1gd", "T2": "t2", "FLAIR": "flair"}
+PREDICTION_FILENAME = "prediction.nii.gz"
+METADATA_FILENAME = "prediction_meta.json"
+_GPU_LOCK = threading.Lock()
 
 
 class SegmentationEngine:
@@ -28,10 +30,8 @@ class SegmentationEngine:
     Strictly verifies study registration and checks segmentation dependencies.
     """
 
-    def __init__(self, weights_path: Optional[Path] = None):
-        self.weights_path = Path(
-            os.environ.get("NEUROSCOPE_MODEL_WEIGHTS", str(weights_path or DEFAULT_WEIGHTS_PATH))
-        )
+    def __init__(self, weights_path: Path = CHECKPOINT):
+        self.weights_path = Path(weights_path)
 
     def check_dependencies(self) -> Tuple[bool, List[str]]:
         """
@@ -40,12 +40,12 @@ class SegmentationEngine:
         """
         missing = []
         try:
-            import torch
+            import torch  # noqa: F401
         except ImportError:
             missing.append("PyTorch (torch)")
 
         try:
-            import monai
+            import monai  # noqa: F401
         except ImportError:
             missing.append("MONAI (monai)")
 
@@ -54,12 +54,15 @@ class SegmentationEngine:
 
         return (len(missing) == 0), missing
 
+    def prediction_path(self, study_id: str) -> Path:
+        return study_store.get_validated_study(study_id).study_dir / PREDICTION_FILENAME
+
     def run_segmentation(self, study_id: str) -> Dict[str, Any]:
         """
         Execute segmentation pipeline on a validated study.
         1. Verifies study exists, is validated, and is unexpired via study_store.
         2. Verifies presence of all 4 required sequences.
-        3. Loads channels in protocol order [T1Gd, T1, T2, FLAIR].
+        3. Runs brainseg inference and saves the BraTS-coded label map in the study directory.
         4. Reports exact missing components if dependencies/weights are not installed.
         """
         # 1. Verification of study
@@ -90,81 +93,57 @@ class SegmentationEngine:
                 f"Upload and validation succeeded, but inference requires these dependencies."
             )
 
-        # 4. If dependencies are present, execute full MONAI SegResNet pipeline
-        import torch
-        from monai.networks.nets import SegResNet
+        # 4. Run the shared pipeline on the uploaded files
+        from brainseg.inference import load_sequences, run_case
 
-        # Load 4-channel tensor in strict protocol order: [T1Gd, T1, T2, FLAIR]
-        channels = []
-        for mod in PROTOCOL_CHANNEL_ORDER:
-            fpath = study.modalities[mod]["path"]
-            img = nib.load(fpath)
-            data = img.get_fdata().astype(np.float32)
-            # Intensity normalization (z-score on non-zero brain mask)
-            mask = data > 0
-            if np.any(mask):
-                data[mask] = (data[mask] - np.mean(data[mask])) / (np.std(data[mask]) + 1e-5)
-            channels.append(data)
+        files = {MODALITY_TO_SEQUENCE[m]: Path(study.modalities[m]["path"]) for m in PROTOCOL_CHANNEL_ORDER}
+        assert set(files) == set(MODEL_INPUT_ORDER)
+        stack, ref = load_sequences(files)
+        out_path = study.study_dir / PREDICTION_FILENAME
+        with _GPU_LOCK:  # one inference at a time on the GPU
+            record = run_case(stack, ref, out_path, files)
+        for f in (Path(study.study_dir) / "viewer_cache").glob("*"):
+            if f.name.startswith(("pred", "meshes")):
+                f.unlink()
+        (study.study_dir / METADATA_FILENAME).write_text(json.dumps(record, indent=2), encoding="utf-8")
+        study.metadata["prediction"] = record
+        study_store.persist(study)
 
-        volume_tensor = torch.from_numpy(np.stack(channels, axis=0)).unsqueeze(0)
-
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = SegResNet(
-            spatial_dims=3,
-            in_channels=4,
-            out_channels=3,
-            init_filters=16,
-            blocks_down=[1, 2, 2, 4],
-            blocks_up=[1, 1, 1],
-            dropout_prob=0.2,
-        )
-        model.load_state_dict(torch.load(self.weights_path, map_location=device))
-        model.to(device)
-        model.eval()
-
-        with torch.no_grad():
-            preds = model(volume_tensor.to(device))
-            probs = torch.sigmoid(preds).cpu().numpy()[0]
-
-        zooms = study.metadata.get("voxel_spacing_mm", [1.0, 1.0, 1.0])
-        voxel_vol_cm3 = float(np.prod(zooms[:3])) / 1000.0
-
-        wt_mask = probs[0] > 0.5
-        tc_mask = probs[1] > 0.5
-        et_mask = probs[2] > 0.5
-
-        wt_voxels = int(np.sum(wt_mask))
-        tc_voxels = int(np.sum(tc_mask))
-        et_voxels = int(np.sum(et_mask))
+        vols = record["estimated_volumes"]
+        sub_regions = {
+            "whole_tumor": {"label": "Whole Tumor (WT)", "codes": [1, 2, 4], **_metric(vols["WT"])},
+            "tumor_core": {"label": "Tumor Core (TC)", "codes": [1, 4], **_metric(vols["TC"])},
+            "enhancing_tumor": {"label": "Enhancing Tumor (ET)", "codes": [4], **_metric(vols["ET"])},
+        }
 
         return {
             "status": "success",
             "study_id": study_id,
-            "message": "3D Brain MRI tumor segmentation completed successfully.",
-            "model": "MONAI SegResNet (BraTS 2021 pre-trained)",
+            "message": "Suspected tumour regions predicted by the model. Volumes are estimates.",
+            "model": f"{MODEL_INFO['name']} v{MODEL_INFO['version']}",
             "input_channel_order": PROTOCOL_CHANNEL_ORDER,
-            "sub_regions": {
-                "whole_tumor": {
-                    "label": "Whole Tumor (WT)",
-                    "volume_cm3": round(wt_voxels * voxel_vol_cm3, 2),
-                    "voxel_count": wt_voxels,
-                },
-                "tumor_core": {
-                    "label": "Tumor Core (TC)",
-                    "volume_cm3": round(tc_voxels * voxel_vol_cm3, 2),
-                    "voxel_count": tc_voxels,
-                },
-                "enhancing_tumor": {
-                    "label": "Enhancing Tumor (ET)",
-                    "volume_cm3": round(et_voxels * voxel_vol_cm3, 2),
-                    "voxel_count": et_voxels,
-                },
-            },
-            "whole_tumor_volume_cm3": round(wt_voxels * voxel_vol_cm3, 2),
-            "tumor_core_volume_cm3": round(tc_voxels * voxel_vol_cm3, 2),
-            "enhancing_tumor_volume_cm3": round(et_voxels * voxel_vol_cm3, 2),
+            "label_codes": record["label_codes"],
+            "prediction_url": f"/api/segmentation/prediction/{study_id}",
+            "sub_regions": sub_regions,
+            "whole_tumor_volume_cm3": sub_regions["whole_tumor"]["volume_cm3"],
+            "tumor_core_volume_cm3": sub_regions["tumor_core"]["volume_cm3"],
+            "enhancing_tumor_volume_cm3": sub_regions["enhancing_tumor"]["volume_cm3"],
+            "estimated_volumes": vols,
+            "shape": record["shape"],
+            "spacing_mm": record["spacing_mm"],
+            "affine": record["affine"],
+            "provenance": record["provenance"],
+            "warnings": study.metadata.get("suitability", {}).get("warnings", []),
+            "viewer_url": f"/viewer/{study_id}",
+            "report_url": f"/report/{study_id}",
+            "disclaimer": DISCLAIMER,
             "status_code": 200,
         }
+
+
+def _metric(v: Dict[str, Any]) -> Dict[str, Any]:
+    # 1 cm3 == 1 mL
+    return {"volume_cm3": round(v["mL"], 2), "voxel_count": v["voxels"]}
 
 
 # Global singleton pipeline

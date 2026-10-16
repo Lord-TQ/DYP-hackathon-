@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PYTHONPATH="${PROJECT_ROOT}/backend:/tmp/packages:${PROJECT_ROOT}/lib:${PYTHONPATH}"
+export PYTHONPATH="${PROJECT_ROOT}/backend:${PYTHONPATH}"  # real nibabel; lib/ shim would shadow it
 
 echo "======================================================================"
 echo " Running NeuroScope 3D Test Suite"

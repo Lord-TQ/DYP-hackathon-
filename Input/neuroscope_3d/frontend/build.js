@@ -48,7 +48,7 @@ const cssContent = fs.readFileSync(path.join(SRC_DIR, 'index.css'), 'utf8');
 let bundleJs = `
 (function() {
   var modules = {};
-  function define(name, fn) { modules[name] = fn; }
+  function define(name, fn) { modules[name] = { fn: fn }; }
   function requireModule(name) {
     if (name === 'react') return window.React;
     if (name === 'react-dom') return window.ReactDOM;

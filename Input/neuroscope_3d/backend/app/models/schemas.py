@@ -61,6 +61,8 @@ class SegmentationRunRequest(BaseModel):
 
 
 class TumorSubRegionMetrics(BaseModel):
+    label: Optional[str] = None
+    codes: Optional[List[int]] = None
     volume_cm3: float
     voxel_count: int
     mean_intensity: Optional[float] = None
@@ -69,11 +71,24 @@ class TumorSubRegionMetrics(BaseModel):
 class SegmentationRunResponse(BaseModel):
     status: str = "success"
     study_id: str
-    message: str = "3D Brain MRI tumor segmentation completed successfully."
-    model: str = "MONAI SegResNet (BraTS 2021 pre-trained)"
+    message: str = "Suspected tumour regions predicted by the model. Volumes are estimates."
+    model: str
     input_channel_order: List[str] = ["T1Gd", "T1", "T2", "FLAIR"]
+    label_codes: Dict[str, str] = Field(..., description="BraTS codes in the prediction NIfTI")
+    prediction_url: str = Field(..., description="Download URL of the NIfTI label map (input grid/affine)")
     sub_regions: Dict[str, TumorSubRegionMetrics]
     whole_tumor_volume_cm3: float
     tumor_core_volume_cm3: float
     enhancing_tumor_volume_cm3: float
+    estimated_volumes: Dict[str, Dict[str, Any]] = Field(
+        ..., description="Per label/region: voxels, voxel_volume_mm3, mm3, mL (voxel count x voxel volume)"
+    )
+    shape: List[int]
+    spacing_mm: List[float]
+    affine: List[List[float]]
+    provenance: Dict[str, Any]
+    warnings: List[str] = Field(default_factory=list, description="Input suitability warnings")
+    viewer_url: str
+    report_url: str
+    disclaimer: str
     status_code: int = 200

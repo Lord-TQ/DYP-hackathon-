@@ -37,6 +37,10 @@ from app.services.modality_detector import (
 )
 from app.services.nifti_validator import NIfTIValidator
 from app.services.study_store import study_store
+from app.services.suitability_check import check_study_suitability
+from app.services.viewer_data import store_expert_mask
+
+EXPERT_FIELDS = ("expert", "expert_mask", "mask", "seg", "label", "labels")
 
 router = APIRouter(prefix="/api/upload", tags=["Upload & Validation"])
 validator = NIfTIValidator()
@@ -135,11 +139,14 @@ async def validate_mri_study(request: Request):
             "flair": "FLAIR",
         }
 
+        expert_upload = None
         for form_key, upload_item in form.multi_items():
             key_lower = form_key.lower()
             # Duck-typing check for UploadFile (supports both Starlette and FastAPI UploadFile)
             if hasattr(upload_item, "file") and hasattr(upload_item, "filename"):
-                if key_lower in field_map:
+                if key_lower in EXPERT_FIELDS:
+                    expert_upload = upload_item
+                elif key_lower in field_map:
                     uploads_to_process.append((field_map[key_lower], upload_item))
                 elif key_lower in ("files", "file", "scans", "images"):
                     uploads_to_process.append((None, upload_item))
@@ -214,6 +221,7 @@ async def validate_mri_study(request: Request):
 
         # Perform complete multi-modality consistency validation
         valid, validated_seqs, metadata, duration = validator.validate_study(staged_files)
+        metadata["suitability"] = check_study_suitability(validated_seqs)
 
         reg_modalities: Dict[str, Dict[str, Any]] = {}
         for mod, info in validated_seqs.items():
@@ -226,17 +234,33 @@ async def validate_mri_study(request: Request):
                 "zooms": list(info.zooms),
             }
 
-        study_store.register_study(
+        study = study_store.register_study(
             study_id=study_id,
             study_dir=study_dir,
             modalities=reg_modalities,
             metadata=metadata,
         )
 
+        # Optional expert mask (BraTS codes 0/1/2/4) on the same grid; an invalid mask rejects the study
+        if expert_upload is not None:
+            orig = getattr(expert_upload, "filename", "") or "expert.nii.gz"
+            dest = study_dir / f"upload_{sanitize_filename(orig)}"
+            try:
+                validator.save_upload_stream(expert_upload.file, dest, orig, modality="expert")
+                store_expert_mask(study, dest)
+            except NIfTIValidationError:
+                study_store.delete_study(study_id)
+                raise
+            finally:
+                dest.unlink(missing_ok=True)
+
         return {
             "status": "success",
             "valid": True,
-            "message": "All four MRI sequences validated successfully.",
+            "message": "All four MRI sequences validated successfully."
+            + (f" {len(metadata['suitability']['warnings'])} suitability warning(s)."
+               if metadata["suitability"]["warnings"] else ""),
+            "warnings": metadata["suitability"]["warnings"],
             "study_id": study_id,
             "modalities": {
                 "T1": "valid",
@@ -245,6 +269,7 @@ async def validate_mri_study(request: Request):
                 "FLAIR": "valid",
             },
             "metadata": metadata,
+            "expert_mask": expert_upload is not None,
             "ready_for_segmentation": True,
         }
 

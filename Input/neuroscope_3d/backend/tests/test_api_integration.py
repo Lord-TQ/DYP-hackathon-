@@ -42,11 +42,11 @@ def create_in_memory_nifti(shape=(32, 32, 16), zooms=(1.0, 1.0, 1.0), constant_v
 
 
 class TestAPIIntegration:
-    def setUp(self):
+    def setup_method(self):
         self.client = TestClient(app)
         study_store.clear()
 
-    def tearDown(self):
+    def teardown_method(self):
         study_store.clear()
 
     def test_01_health_check_endpoint(self):
@@ -139,4 +139,6 @@ class TestAPIIntegration:
             assert "PyTorch (torch)" in err_msg
             assert "MONAI (monai)" in err_msg
         else:
-            assert seg_res.json()["status"] == "success"
+            body = seg_res.json()
+            assert body["status"] == "success"
+            assert body["label_codes"] == {"0": "background", "1": "NCR", "2": "ED", "4": "ET"}

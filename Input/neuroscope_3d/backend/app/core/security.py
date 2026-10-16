@@ -7,11 +7,14 @@ import os
 import re
 import secrets
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Union
 
-BASE_STUDY_DIR = Path("/tmp/neuroscope_studies")
+BASE_STUDY_DIR = Path(
+    os.environ.get("NEUROSCOPE_STUDY_DIR", Path(tempfile.gettempdir()) / "neuroscope_studies")
+).resolve()
 
 
 def sanitize_filename(filename: str) -> str:

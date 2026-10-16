@@ -71,11 +71,11 @@ def make_synthetic_nifti(
 
 
 class TestJudgesFailurePack:
-    def setUp(self):
+    def setup_method(self):
         self.temp_dir = Path(tempfile.mkdtemp(prefix="neuroscope_judge_tests_"))
         self.validator = NIfTIValidator()
 
-    def tearDown(self):
+    def teardown_method(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_01_fake_nifti_file(self):

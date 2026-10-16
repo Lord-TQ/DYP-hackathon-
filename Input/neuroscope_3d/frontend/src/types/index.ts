@@ -70,4 +70,9 @@ export interface SegmentationResponse {
   whole_tumor_volume_cm3: number;
   tumor_core_volume_cm3: number;
   enhancing_tumor_volume_cm3: number;
+  prediction_url: string;
+  viewer_url: string;
+  report_url: string;
+  warnings: string[];
+  disclaimer: string;
 }

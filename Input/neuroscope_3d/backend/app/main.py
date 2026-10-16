@@ -9,15 +9,22 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import segmentation, upload
+import app.core.paths  # noqa: F401
+from app.api import backup, segmentation, upload, viewer
 from app.core.exceptions import NIfTIValidationError
+from app.services.study_store import study_store
+
+from brainseg.constants import DISCLAIMER
 
 app = FastAPI(
-    title="NeuroScope 3D — NIfTI Upload & Validation Module",
-    description="Medical imaging upload, multi-sequence validation, and BraTS 2021 segmentation interface.",
+    title="NeuroScope 3D — research prototype",
+    description=f"**{DISCLAIMER}**\n\nUpload four co-registered MRI sequences, run the pretrained MONAI SegResNet, "
+                "view suspected tumour regions predicted by the model in 3D and linked slices, and download the "
+                "NIfTI label map (BraTS codes 1 NCR, 2 ED, 4 ET) and a report.",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -30,6 +37,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=4096)
+
+
+@app.on_event("startup")
+def start_upload_sweeper():
+    """Reload persisted studies and delete uploads older than the TTL (< 24 h), now and every 10 min."""
+    study_store.start_sweeper()
 
 
 @app.exception_handler(NIfTIValidationError)
@@ -44,6 +58,9 @@ async def nifti_validation_exception_handler(request: Request, exc: NIfTIValidat
 # Include API routers
 app.include_router(upload.router)
 app.include_router(segmentation.router)
+app.include_router(viewer.router)
+app.include_router(backup.router)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 
 # Paths for frontend web app
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -72,7 +89,7 @@ if (FRONTEND_DIST / "assets").exists():
 async def serve_root():
     """Serve the interactive web frontend at root URL."""
     if FRONTEND_INDEX.exists():
-        return FileResponse(str(FRONTEND_INDEX))
+        return FileResponse(str(FRONTEND_INDEX), headers={"Cache-Control": "no-cache"})
 
     fallback_index = PROJECT_ROOT / "frontend" / "index.html"
     if fallback_index.exists():

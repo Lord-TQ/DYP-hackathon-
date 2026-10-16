@@ -708,9 +708,9 @@ body {
 <body>
   <div id="root"></div>
 
-  <!-- CDN scripts if online -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- React served locally by the backend (works offline) -->
+  <script src="/static/vendor/react.production.min.js"></script>
+  <script src="/static/vendor/react-dom.production.min.js"></script>
 
   <!-- Fallback full React engine if offline -->
   
@@ -882,7 +882,7 @@ body {
 
 (function() {
   var modules = {};
-  function define(name, fn) { modules[name] = fn; }
+  function define(name, fn) { modules[name] = { fn: fn }; }
   function requireModule(name) {
     if (name === 'react') return window.React;
     if (name === 'react-dom') return window.ReactDOM;
@@ -1205,7 +1205,7 @@ const ValidationSummary = ({
     className: "metric-label"
   }, "Image Orientation"), /*#__PURE__*/_react.default.createElement("span", {
     className: "metric-value"
-  }, metadata.orientation.join(''), " (Radiological RAS)")), /*#__PURE__*/_react.default.createElement("div", {
+  }, metadata.orientation.join(''), " (voxel axis codes)")),/*#__PURE__*/_react.default.createElement("div", {
     className: "summary-metric"
   }, /*#__PURE__*/_react.default.createElement("span", {
     className: "metric-label"
@@ -1262,11 +1262,19 @@ const SegmentationResult = ({
     className: "seg-header"
   }, /*#__PURE__*/_react.default.createElement("h2", {
     className: "seg-title"
-  }, "3D Brain Tumor Segmentation: COMPLETE"), /*#__PURE__*/_react.default.createElement("span", {
+  }, "Suspected tumour regions predicted by the model"), /*#__PURE__*/_react.default.createElement("span", {
     className: "model-badge"
   }, result.model)), /*#__PURE__*/_react.default.createElement("p", {
     className: "seg-desc"
-  }, "Input channels loaded in strict MONAI SegResNet protocol order:", ' ', /*#__PURE__*/_react.default.createElement("code", null, result.input_channel_order.join(' &rarr; '))), /*#__PURE__*/_react.default.createElement("div", {
+  }, "Estimated volumes (voxel count \xD7 voxel volume). Not a diagnosis. Input channel order:", ' ', /*#__PURE__*/_react.default.createElement("code", null, result.input_channel_order.join(' → '))), (result.warnings && result.warnings.length) ? /*#__PURE__*/_react.default.createElement("div", {
+    className: "study-error-alert"
+  }, /*#__PURE__*/_react.default.createElement("div", {
+    className: "alert-content"
+  }, /*#__PURE__*/_react.default.createElement("h3", {
+    className: "alert-title"
+  }, "Input suitability warnings"), result.warnings.map(function (w, i) {
+    return /*#__PURE__*/_react.default.createElement("p", { className: "alert-msg", key: i }, w);
+  }))) : null, /*#__PURE__*/_react.default.createElement("div", {
     className: "volumetrics-grid"
   }, /*#__PURE__*/_react.default.createElement("div", {
     className: "volumetric-box wt-box"
@@ -1294,13 +1302,26 @@ const SegmentationResult = ({
     className: "vol-title"
   }, "Enhancing Tumor (ET)"), /*#__PURE__*/_react.default.createElement("span", {
     className: "vol-sub"
-  }, "(Active Hyper-enhancing)"), /*#__PURE__*/_react.default.createElement("span", {
+  }, "(Label 4)"), /*#__PURE__*/_react.default.createElement("span", {
     className: "vol-value"
   }, result.enhancing_tumor_volume_cm3.toFixed(2), " cm\xB3"), /*#__PURE__*/_react.default.createElement("span", {
     className: "voxel-count"
   }, result.sub_regions.enhancing_tumor.voxel_count.toLocaleString(), " voxels"))), /*#__PURE__*/_react.default.createElement("div", {
     className: "seg-footer"
-  }, /*#__PURE__*/_react.default.createElement("button", {
+  }, /*#__PURE__*/_react.default.createElement("a", {
+    className: "btn-primary-action",
+    href: result.viewer_url,
+    style: { marginRight: "0.75rem", textDecoration: "none", display: "inline-block", width: "auto" }
+  }, "Open 3D & slice viewer"), /*#__PURE__*/_react.default.createElement("a", {
+    className: "btn-secondary",
+    href: result.report_url,
+    target: "_blank",
+    style: { marginRight: "0.75rem", textDecoration: "none" }
+  }, "Report"), /*#__PURE__*/_react.default.createElement("a", {
+    className: "btn-secondary",
+    href: result.prediction_url,
+    style: { marginRight: "0.75rem", textDecoration: "none" }
+  }, "Download label map (NIfTI)"), /*#__PURE__*/_react.default.createElement("button", {
     type: "button",
     className: "btn-secondary",
     onClick: onReset

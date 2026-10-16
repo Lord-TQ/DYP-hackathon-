@@ -10,10 +10,13 @@ import os
 from pathlib import Path
 import struct
 import time
+import zlib
 from typing import Any, Dict, List, Optional, Tuple
 
 import nibabel as nib
 import numpy as np
+from nibabel.filebasedimages import ImageFileError
+from nibabel.spatialimages import HeaderDataError
 
 from app.core.exceptions import (
     AffineMismatchError,
@@ -147,11 +150,12 @@ class NIfTIValidator:
 
         # 1. Readability with nibabel
         try:
-            img = nib.load(str(file_path))
+            img = nib.load(str(file_path), mmap=False)
         except (
-            nib.ImageFileError,
-            nib.HeaderDataError,
+            ImageFileError,
+            HeaderDataError,
             gzip.BadGzipFile,
+            zlib.error,
             EOFError,
             struct.error,
             OSError,
