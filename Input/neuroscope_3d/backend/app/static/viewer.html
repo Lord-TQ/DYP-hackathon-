@@ -4,21 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NeuroScope 3D Viewer</title>
+  <link rel="stylesheet" href="/static/base.css">
   <link rel="stylesheet" href="/static/viewer.css">
   <script type="importmap">{ "imports": { "three": "/static/vendor/three.module.js" } }</script>
 </head>
 <body>
-  <header class="top">
-    <div class="brand"><span class="logo">&#129504;</span><div><h1>NeuroScope 3D</h1><span class="sub">3D &amp; linked-slice viewer</span></div></div>
-    <nav>
-      <span id="study" class="muted"></span>
-      <a id="lnk-report" target="_blank">Report</a>
-      <a id="lnk-pdf" target="_blank">PDF</a>
-      <a id="lnk-nifti">Prediction NIfTI</a>
-      <a href="/">New upload</a>
-    </nav>
+  <div class="safety" role="note">
+    <span>Research &amp; teaching prototype</span><span>Suspected regions predicted by the model</span><span>Not a diagnosis</span><span>Not clinically validated</span>
+  </div>
+  <header class="nav dark">
+    <a class="wordmark" href="/">Neuro<em>scope</em><sup>3D</sup></a>
+    <ul>
+      <li><a id="lnk-report" target="_blank">Report</a></li>
+      <li><a id="lnk-pdf" target="_blank">PDF</a></li>
+      <li><a id="lnk-nifti">Label map</a></li>
+      <li><a href="/#analyse">New study</a></li>
+    </ul>
+    <span id="study" class="study"></span>
   </header>
-  <div class="disclaimer" id="disclaimer">Research and teaching prototype. Outputs are suspected tumour regions predicted by the model and estimated volumes. Not a diagnosis; not clinically validated; not for clinical use.</div>
   <div class="backup" id="backup" hidden></div>
   <div class="warnings" id="warnings" hidden></div>
   <div class="status" id="status">Loading study…</div>
@@ -65,18 +68,29 @@
             <option value="agree-WT" disabled>Agreement — WT</option>
             <option value="agree-TC" disabled>Agreement — TC</option>
             <option value="agree-ET" disabled>Agreement — ET</option>
+            <option value="uncert" disabled>Uncertainty (TTA, WT)</option>
             <option value="none">None</option>
           </select>
         </label>
         <label class="row">Overlay opacity <input type="range" id="ov-alpha" min="0" max="1" step="0.05" value="0.5"></label>
         <div class="row labels" id="label-toggles">
-          <label><input type="checkbox" data-code="1" checked><i style="background:#e5484d"></i>NCR 1</label>
-          <label><input type="checkbox" data-code="2" checked><i style="background:#30a46c"></i>ED 2</label>
-          <label><input type="checkbox" data-code="4" checked><i style="background:#f5d90a"></i>ET 4</label>
+          <label><input type="checkbox" data-code="1" checked><i style="background:#d6452c"></i>NCR 1</label>
+          <label><input type="checkbox" data-code="2" checked><i style="background:#78a870"></i>ED 2</label>
+          <label><input type="checkbox" data-code="4" checked><i style="background:#e8b030"></i>ET 4</label>
         </div>
         <div class="legend" id="agree-legend" hidden>
-          <span><i style="background:#22c55e"></i>both</span><span><i style="background:#f97316"></i>model only</span><span><i style="background:#3b82f6"></i>expert only</span>
+          <span><i style="background:#78a870"></i>both</span><span><i style="background:#d6452c"></i>model only</span><span><i style="background:#6fa3b5"></i>expert only</span>
         </div>
+        <div class="legend" id="uncert-legend" hidden>
+          <span><i style="background:#78a870"></i>4/4</span><span><i style="background:#e2d6a0"></i>3/4</span><span><i style="background:#e8b030"></i>2/4</span><span><i style="background:#d6452c"></i>1/4 passes call it WT</span>
+        </div>
+      </div>
+
+      <div class="card" id="trust-card">
+        <h2>How much to trust it</h2>
+        <div id="trust" class="small"></div>
+        <button class="small" id="run-ablation">Run modality ablation</button>
+        <div id="ablation" class="small"></div>
       </div>
 
       <div class="card">
@@ -95,7 +109,7 @@
     <div id="agreement"></div>
   </section>
 
-  <footer class="foot">Research and teaching prototype — not a diagnosis, not clinically validated. Use only public, de-identified research data. Uploads are deleted automatically within 24 hours.</footer>
+  <footer class="foot"><span id="disclaimer">Research and teaching prototype. Outputs are suspected tumour regions predicted by the model and estimated volumes. Not a diagnosis; not clinically validated; not for clinical use.</span> Use only public, de-identified research data. Uploads are deleted automatically within 24 hours.</footer>
 
   <script type="module" src="/static/viewer.js"></script>
 </body>

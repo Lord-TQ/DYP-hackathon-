@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NeuroScope 3D</title>
+  <meta name="description" content="Research and teaching prototype: suspected tumour regions predicted by a pretrained model on brain MRI, estimated volumes, 3D and linked-slice viewer.">
+  <link rel="stylesheet" href="/static/base.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="safety" role="note">
+    <span>Research &amp; teaching prototype</span><span>Not a diagnosis</span><span>Not clinically validated</span><span>Uploads deleted within 24 h</span>
+  </div>
+
+  <header class="nav">
+    <a class="wordmark" href="/">Neuro<em>scope</em><sup>3D</sup></a>
+    <ul>
+      <li><a href="#analyse">Analyse</a></li>
+      <li><a href="#method">Method</a></li>
+      <li><a href="#evaluation">Evaluation</a></li>
+      <li><a href="#limits">Limits</a></li>
+    </ul>
+    <span class="status mono" id="status"><i class="dot"></i>checking…</span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-text">
+        <p class="eyebrow">Brain MRI &nbsp;/&nbsp; segmentation instrument &nbsp;/&nbsp; built in 24 hours</p>
+        <h1>A second look,<br><em>in three dimensions.</em></h1>
+        <p class="lede">
+          Drop one MRI study. NeuroScope runs a pretrained MONAI SegResNet over T1, T1Gd, T2 and FLAIR,
+          outlines the <strong>suspected tumour regions predicted by the model</strong>, estimates each in
+          millilitres, and lets you walk through them slice by slice and in 3D. It takes under a minute, and the scan
+          never leaves this machine.
+        </p>
+        <div class="cta">
+          <a class="btn" href="#analyse">Analyse a study <span class="arr">→</span></a>
+          <a class="btn ghost" href="/backup" title="Opens a precomputed case, clearly labelled as such">Precomputed sample</a>
+        </div>
+        <dl class="figures" id="figures">
+          <div><dt>Whole-tumour Dice</dt><dd id="fig-wt">—</dd><small id="fig-wt-note">held-out cases</small></div>
+          <div><dt>Upload → report</dt><dd>&lt;30<span class="unit">s</span></dd><small>on a 4 GB laptop GPU</small></div>
+          <div><dt>Leaves the machine</dt><dd>0<span class="unit">B</span></dd><small>no third-party services</small></div>
+        </dl>
+      </div>
+
+      <figure class="plate" aria-label="Axial sweep through a public sample case with the model's predicted contours">
+        <div class="plate-frame">
+          <canvas id="plate" width="300" height="381"></canvas>
+          <div class="ruler" aria-hidden="true"></div>
+          <div class="plate-read mono" id="plate-read" aria-hidden="true"></div>
+        </div>
+        <figcaption>
+          <span class="mono">Plate 1.</span> <span id="plate-case">BRATS_001</span>, FLAIR, axial sweep (radiological: patient right on the left).
+          Contours are the model's prediction:
+          <span class="nowrap"><i class="swatch s-ncr"></i>NCR</span>
+          <span class="nowrap"><i class="swatch s-ed"></i>ED</span>
+          <span class="nowrap"><i class="swatch s-et"></i>ET</span>.
+        </figcaption>
+      </figure>
+    </section>
+
+    <section id="analyse" class="block">
+      <header class="block-head">
+        <span class="num">01</span>
+        <h2>Analyse a study</h2>
+        <p>One 4-channel NIfTI, <em>or</em> the four sequences as separate files. Add an expert mask (BraTS codes 1/2/4) to compare against.</p>
+      </header>
+
+      <div class="analyse-grid">
+        <div>
+          <label class="drop" id="drop">
+            <input type="file" id="file-input" multiple accept=".nii,.gz,.nii.gz">
+            <span class="drop-big">Drop the study here</span>
+            <span class="drop-small">
+              <b>one file</b> with the four sequences stacked (X × Y × Z × 4) &nbsp;·&nbsp; <b>or four files</b> named
+              *_t1, *_t1ce, *_t2, *_flair &nbsp;·&nbsp; optional *_seg mask &nbsp;·&nbsp; .nii / .nii.gz, ≤ 1 GB each
+            </span>
+            <span class="btn ghost small">Choose files</span>
+          </label>
+
+          <div id="manifest" class="manifest" hidden></div>
+          <p id="hint" class="hint" hidden></p>
+
+          <div class="run-row">
+            <button class="btn" id="run" disabled>Run analysis <span class="arr">→</span></button>
+            <button class="btn ghost" id="clear" hidden>Clear</button>
+          </div>
+          <div id="error" class="error" role="alert" hidden></div>
+        </div>
+
+        <aside class="log">
+          <p class="eyebrow">Run log</p>
+          <ol id="steps" class="steps">
+            <li data-step="upload"><span>Upload</span><time></time></li>
+            <li data-step="checks"><span>Structural &amp; suitability checks</span><time></time></li>
+            <li data-step="segment"><span>Segmentation (SegResNet, GPU)</span><time></time></li>
+            <li data-step="finish"><span>Volumes, surfaces, report</span><time></time></li>
+          </ol>
+          <p class="log-note">Invalid input is refused with a reason and never reaches the model.</p>
+        </aside>
+      </div>
+
+      <div id="result" class="result" hidden></div>
+    </section>
+
+    <section id="method" class="block">
+      <header class="block-head">
+        <span class="num">02</span>
+        <h2>Method</h2>
+        <p>Every step below is the code path the judges' case runs through. Nothing is looked up from a stored dataset.</p>
+      </header>
+      <ol class="flow">
+        <li><span class="mono">i</span><h3>Input</h3><p>T1, T1Gd, T2, FLAIR on one grid. A single 4-channel file is split on the server.</p></li>
+        <li><span class="mono">ii</span><h3>Checks</h3><p>Readable, 3D, finite, non-constant, ≤ 1 GB, matching shape and affine, skull-stripped heuristic.</p></li>
+        <li><span class="mono">iii</span><h3>Model</h3><p>Reorient to RAS, resample to 1 mm, z-score per channel; SegResNet (MONAI, Apache-2.0) outputs TC, WT, ET.</p></li>
+        <li><span class="mono">iv</span><h3>Labels</h3><p>Inverted back to the uploaded grid and affine; written as BraTS codes 1 · 2 · 4.</p></li>
+        <li><span class="mono">v</span><h3>Volume</h3><p class="formula">V = N × Δx·Δy·Δz<br>mL = mm³ ÷ 1000</p></li>
+        <li><span class="mono">vi</span><h3>Output</h3><p>NIfTI label map, 3D + linked-slice viewer, HTML/PDF report with provenance.</p></li>
+      </ol>
+      <table class="codes">
+        <thead><tr><th>Code</th><th>Region</th><th>Grouped into</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1</td><td><i class="swatch s-ncr"></i>NCR — necrotic core</td><td class="mono">TC, WT</td></tr>
+          <tr><td class="mono">2</td><td><i class="swatch s-ed"></i>ED — oedema</td><td class="mono">WT</td></tr>
+          <tr><td class="mono">4</td><td><i class="swatch s-et"></i>ET — enhancing</td><td class="mono">ET, TC, WT</td></tr>
+        </tbody>
+      </table>
+      <p class="aside">Codes are category identifiers, not severity scores.</p>
+    </section>
+
+    <section id="evaluation" class="block">
+      <header class="block-head">
+        <span class="num">03</span>
+        <h2>Evaluation</h2>
+        <p id="eval-intro">Dice and sensitivity per region on held-out labelled cases.</p>
+      </header>
+      <div class="eval-grid">
+        <table class="eval" id="eval-table"><tbody><tr><td>Loading…</td></tr></tbody></table>
+        <div class="disclosure">
+          <p class="eyebrow">Read this before the numbers</p>
+          <p id="eval-disclosure"></p>
+          <p class="eyebrow" style="margin-top:18px">Cases</p>
+          <p id="eval-cases" class="mono small"></p>
+        </div>
+      </div>
+    </section>
+
+    <section id="limits" class="block">
+      <header class="block-head">
+        <span class="num">04</span>
+        <h2>Limits</h2>
+        <p>Where this model can be wrong, and what it will never claim.</p>
+      </header>
+      <ol class="limits" id="limits-list"></ol>
+      <p class="never">No diagnosis · no grading · no genetics · no prognosis · no treatment advice · no surgical or radiotherapy planning · no clinical validation or regulatory approval.</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div>
+      <a class="wordmark" href="/">Neuro<em>scope</em><sup>3D</sup></a>
+      <p id="disclaimer-full">Research and teaching prototype. Outputs are suspected tumour regions predicted by the model and estimated volumes. Not a diagnosis; not clinically validated; not for clinical use.</p>
+    </div>
+    <div>
+      <p class="eyebrow">Model</p>
+      <p>MONAI <span class="mono">brats_mri_segmentation</span> v0.5.4, SegResNet (Myronenko, 2018). Apache-2.0.</p>
+    </div>
+    <div>
+      <p class="eyebrow">Data</p>
+      <p>Medical Segmentation Decathlon (Antonelli et al., 2022), derived from BraTS (Menze et al., 2015; Bakas et al., 2017, 2018). Public, de-identified.</p>
+    </div>
+    <div>
+      <p class="eyebrow">Elsewhere</p>
+      <p><a href="/docs">API docs</a> · <a href="/backup">Precomputed sample</a></p>
+    </div>
+  </footer>
+
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>

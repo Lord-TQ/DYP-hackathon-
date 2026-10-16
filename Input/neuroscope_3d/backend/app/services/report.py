@@ -25,7 +25,7 @@ from app.services.study_store import ValidatedStudy  # noqa: E402
 from brainseg.constants import DISCLAIMER, LIMITATIONS, MODEL_INFO, PREPROCESSING  # noqa: E402
 
 EVALUATION_FILE = REPO_ROOT / "evaluation" / "metrics.json"
-LABEL_CMAP = ListedColormap(["none", "#e5484d", "#30a46c", "none", "#f5d90a"])
+LABEL_CMAP = ListedColormap(["none", "#d6452c", "#78a870", "none", "#e8b030"])
 REGION_ORDER = ["NCR", "ED", "ET", "TC", "WT"]
 REGION_DESC = {
     "NCR": "label 1", "ED": "label 2", "ET": "label 4", "TC": "labels 1+4", "WT": "labels 1+2+4",
@@ -78,7 +78,7 @@ def snapshot_png(study: ValidatedStudy) -> bytes:
                 ax.imshow(lab_views[name][0], cmap=LABEL_CMAP, vmin=0, vmax=4, alpha=0.45,
                           aspect=aspects[name], interpolation="nearest")
             for txt, pos in ((left, (0.02, 0.5)), (right, (0.98, 0.5)), (top, (0.5, 0.97)), (bottom, (0.5, 0.03))):
-                ax.text(*pos, txt, transform=ax.transAxes, color="#38bdf8", fontsize=11, fontweight="bold",
+                ax.text(*pos, txt, transform=ax.transAxes, color="#f2ede3", fontsize=11, fontweight="bold",
                         ha="center", va="center")
             ax.set_title(f"{title} — {name}", fontsize=9)
             ax.axis("off")
@@ -117,8 +117,51 @@ def _backup_text(m) -> str:
 
 def _backup_html(m) -> str:
     t = _backup_text(m)
-    return (f"<p style='background:#7c2d12;color:#ffedd5;padding:8px 12px;border-radius:6px;font-weight:700'>"
+    return (f"<p style='background:#c8402a;color:#fff6ec;padding:9px 14px;font-weight:600'>"
             f"{html.escape(t)}</p>") if t else ""
+
+
+def _source_text(m) -> str:
+    s = m.get("source_4d")
+    if not s:
+        return ""
+    order = ", ".join(f"ch{i} = {mod}" for i, mod in enumerate(s["channel_order"]))
+    return (f"Uploaded as one 4-channel file {s['file']} (shape {s['shape']}, SHA-256 {s['sha256']}); "
+            f"split server-side as {order}. The per-sequence hashes above are of the split channels.")
+
+
+def _trust_rows(m):
+    """(paragraph, table rows) describing TTA uncertainty and, if computed, modality ablation."""
+    out = []
+    u = m.get("uncertainty")
+    if u:
+        out.append(("Test-time augmentation: the model was re-run on the scan mirrored along each axis "
+                    f"({u['passes']} passes; the label map is from the un-augmented pass). "
+                    f"{u['wt_uncertain_fraction'] * 100:.1f}% of WT voxels are disputed between passes; WT is "
+                    f"{u['wt_unanimous_mL']:.2f} mL where all passes agree and {u['wt_any_mL']:.2f} mL where any pass "
+                    "predicts it.",
+                    [["Region", "Volume range across passes (mL)", "Lowest Dice vs main pass"]]
+                    + [[r, f"{x['volume_mL_min']:.2f} – {x['volume_mL_max']:.2f}", f"{min(x['dice_vs_main_per_pass']):.3f}"]
+                       for r, x in u["regions"].items()]))
+    a = m.get("ablation")
+    if a:
+        out.append((f"{a['label']}. {a['method']}",
+                    [["Input change", "WT Dice vs full", "TC Dice vs full", "ET Dice vs full"]]
+                    + [[f"without {s.upper()}"] + [f"{v[r]['dice_vs_full']:.2f}" for r in ("WT", "TC", "ET")]
+                       for s, v in a["removed_sequence"].items()]))
+    return out
+
+
+def _trust_html(m) -> str:
+    blocks = _trust_rows(m)
+    if not blocks:
+        return ""
+    html_out = "<h2>How much to trust it</h2>"
+    for para, rows in blocks:
+        html_out += (f"<p>{html.escape(para)}</p><table><tr>" + "".join(f"<th>{html.escape(h)}</th>" for h in rows[0])
+                     + "</tr>" + "".join("<tr>" + "".join(f"<td>{html.escape(str(c))}</td>" for c in r) + "</tr>"
+                                         for r in rows[1:]) + "</table>")
+    return html_out
 
 
 def _fmt(v, nd=3):
@@ -190,17 +233,24 @@ def render_html(study: ValidatedStudy) -> str:
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width, initial-scale=1">
 <title>NeuroScope 3D report</title>
+<link rel="stylesheet" href="/static/base.css">
 <style>
-:root {{ --fg:#111827; --muted:#6b7280; --bg:#ffffff; --line:#e5e7eb; --warn:#92400e; --warnbg:#fef3c7; }}
-body {{ font-family: system-ui, Segoe UI, Arial, sans-serif; color:var(--fg); background:var(--bg); max-width: 960px;
-       margin: 0 auto; padding: 16px; line-height: 1.45; }}
-h1 {{ font-size: 1.5rem; margin: .2rem 0; }} h2 {{ font-size: 1.1rem; margin-top: 1.6rem; border-bottom:1px solid var(--line); }}
-table {{ border-collapse: collapse; width: 100%; font-size: .9rem; }} td, th {{ border:1px solid var(--line); padding:4px 6px; text-align:left; }}
-.disclaimer {{ background:#fee2e2; color:#7f1d1d; border:1px solid #fca5a5; padding:8px 12px; border-radius:6px; font-weight:600; }}
-.warn {{ background:var(--warnbg); color:var(--warn); padding:6px 10px; border-radius:6px; }}
-.muted {{ color: var(--muted); }} .mono {{ font-family: Consolas, monospace; font-size: .75rem; word-break: break-all; }}
-img {{ max-width: 100%; }} .toolbar a {{ margin-right: 1rem; }}
-@media print {{ .toolbar {{ display:none; }} }}
+:root {{ --fg:#171614; --muted:#7a7468; --bg:#f2ede3; --line:#c9bfab; --warn:#5a3d06; --warnbg:#f3dfb4; --accent:#c8402a; }}
+body {{ font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; color:var(--fg); background:var(--bg); max-width: 980px;
+       margin: 0 auto; padding: 0 16px 40px; line-height: 1.5; }}
+* {{ border-radius: 0 !important; }}
+h1 {{ font: 400 clamp(32px, 5vw, 52px)/1.02 "Instrument Serif", Georgia, serif; margin: 22px 0 6px; letter-spacing: -.01em; }}
+h2 {{ font: 400 28px/1.1 "Instrument Serif", Georgia, serif; margin: 34px 0 10px; padding-top: 10px; border-top: 1px solid var(--fg); }}
+h3 {{ font: 500 11px "IBM Plex Mono", Consolas, monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }}
+table {{ border-collapse: collapse; width: 100%; font-size: .9rem; }}
+td, th {{ border-bottom:1px solid var(--line); padding:6px 10px 6px 0; text-align:left; vertical-align: top; }}
+th {{ font: 500 10.5px "IBM Plex Mono", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); border-bottom-color: var(--fg); }}
+.disclaimer {{ background: var(--fg); color: var(--bg); padding: 9px 14px; font: 500 12px/1.5 "IBM Plex Mono", Consolas, monospace; letter-spacing: .03em; }}
+.warn {{ background:var(--warnbg); color:var(--warn); padding:8px 12px; }}
+.muted {{ color: var(--muted); }} .mono {{ font-family: "IBM Plex Mono", Consolas, monospace; font-size: .75rem; word-break: break-all; }}
+img {{ max-width: 100%; border: 1px solid var(--fg); }}
+.toolbar {{ display: flex; gap: 18px; font: 400 13px "IBM Plex Mono", Consolas, monospace; margin: 14px 0 0; }}
+@media print {{ .toolbar {{ display:none; }} body {{ background: #fff; }} }}
 </style></head><body>
 <div class=disclaimer>{e(d['disclaimer'])}</div>
 {_backup_html(m)}
@@ -213,6 +263,7 @@ img {{ max-width: 100%; }} .toolbar a {{ margin-right: 1rem; }}
 <table><tr><th>Sequence</th><th>File</th><th>SHA-256</th></tr>{inputs}</table>
 <p>Grid {m['original_shape']} voxels, spacing {', '.join(f'{s:.3f}' for s in sp)} mm, orientation {e(m['original_orientation'])}.
 Expert mask: {'supplied' if m['has_expert'] else 'not supplied'}.</p>
+{f"<p class=mono>{e(_source_text(m))}</p>" if _source_text(m) else ""}
 <h3>Suitability warnings</h3>{warn_html}
 
 <h2>Estimated volumes of suspected regions predicted by the model</h2>
@@ -221,6 +272,7 @@ Expert mask: {'supplied' if m['has_expert'] else 'not supplied'}.</p>
 <table><tr><th>Region</th><th>Model voxels N</th><th>Model mm³</th><th>Model mL</th>{expert_cols}</tr>{vol_rows()}</table>
 <p><img alt="Axial, coronal and sagittal FLAIR slices with predicted label overlay" src="data:image/png;base64,{img}"></p>
 {agreement}
+{_trust_html(m)}
 {evaluation}
 
 <h2>Provenance</h2>
@@ -255,7 +307,7 @@ def render_pdf(study: ValidatedStudy) -> bytes:
     body = ParagraphStyle("b", parent=ss["BodyText"], fontSize=8.5, leading=11)
     small = ParagraphStyle("s", parent=body, fontSize=7, leading=9)
     h2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=11, spaceBefore=8, spaceAfter=4, keepWithNext=1)
-    disc = ParagraphStyle("d", parent=body, textColor=colors.HexColor("#7f1d1d"), backColor=colors.HexColor("#fee2e2"),
+    disc = ParagraphStyle("d", parent=body, textColor=colors.HexColor("#f2ede3"), backColor=colors.HexColor("#171614"),
                           borderPadding=4, fontName="Helvetica-Bold")
     e = html.escape
 
@@ -263,15 +315,15 @@ def render_pdf(study: ValidatedStudy) -> bytes:
         t = Table(rows, colWidths=widths, repeatRows=1)
         t.setStyle(TableStyle([
             ("FONT", (0, 0), (-1, -1), "Helvetica", 7.5), ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 7.5),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d1d5db")),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f3f4f6")), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#c9bfab")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#ece6da")), ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ]))
         return t
 
     story = [Paragraph(e(d["disclaimer"]), disc), Spacer(1, 6)]
     if _backup_text(m):
         story += [Paragraph(e(_backup_text(m)), ParagraphStyle(
-            "bk", parent=body, textColor=colors.HexColor("#ffedd5"), backColor=colors.HexColor("#7c2d12"),
+            "bk", parent=body, textColor=colors.HexColor("#fff6ec"), backColor=colors.HexColor("#c8402a"),
             borderPadding=4, fontName="Helvetica-Bold")), Spacer(1, 6)]
     story += [
              Paragraph("NeuroScope 3D — estimated tumour-region volumes", ss["Title"]),
@@ -284,6 +336,8 @@ def render_pdf(study: ValidatedStudy) -> bytes:
     story.append(Paragraph(
         f"Grid {m['original_shape']} voxels, spacing {', '.join(f'{s:.3f}' for s in sp)} mm, orientation "
         f"{m['original_orientation']}. Expert mask: {'supplied' if m['has_expert'] else 'not supplied'}.", body))
+    if _source_text(m):
+        story.append(Paragraph(e(_source_text(m)), small))
     warnings = m["suitability"].get("warnings", [])
     story.append(Paragraph("<b>Suitability warnings:</b> " + (" ".join(e(w) for w in warnings) if warnings else "none."), body))
 
@@ -312,6 +366,12 @@ def render_pdf(study: ValidatedStudy) -> bytes:
         story.append(Paragraph("Agreement with the supplied expert mask (this case only)", h2))
         story.append(table([["Region", "Dice", "Sensitivity", "HD95 (mm)"]] + [
             [r, _fmt(v["dice"]), _fmt(v["sensitivity"]), _fmt(v["hd95_mm"], 1)] for r, v in m["agreement"].items()]))
+
+    trust = _trust_rows(m)
+    if trust:
+        story.append(Paragraph("How much to trust it", h2))
+        for para, rows in trust:
+            story += [Paragraph(e(para), body), table(rows), Spacer(1, 4)]
 
     ev = d["evaluation"]
     story.append(Paragraph(f"Model evaluation ({ev['n_cases']} held-out labelled cases)" if ev else "Model evaluation", h2))
@@ -344,7 +404,7 @@ def render_pdf(study: ValidatedStudy) -> bytes:
     def footer(canvas, doc):
         canvas.saveState()
         canvas.setFont("Helvetica-Bold", 7)
-        canvas.setFillColor(colors.HexColor("#7f1d1d"))
+        canvas.setFillColor(colors.HexColor("#171614"))
         lines = textwrap.wrap(DISCLAIMER, 150)
         line1, line2 = lines[0], " ".join(lines[1:])
         canvas.drawCentredString(A4[0] / 2, 8 * mm, line1)

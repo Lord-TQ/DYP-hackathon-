@@ -87,6 +87,7 @@ class SegmentationRunResponse(BaseModel):
     spacing_mm: List[float]
     affine: List[List[float]]
     provenance: Dict[str, Any]
+    uncertainty: Optional[Dict[str, Any]] = Field(None, description="Test-time-augmentation agreement summary")
     warnings: List[str] = Field(default_factory=list, description="Input suitability warnings")
     viewer_url: str
     report_url: str

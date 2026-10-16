@@ -20,6 +20,8 @@ def main(argv=None) -> int:
     p.add_argument("--msd4d", type=Path, help="Decathlon Task01 4D image instead of four files")
     p.add_argument("--out", type=Path, required=True, help="Output label map (.nii.gz)")
     p.add_argument("--meta", type=Path, help="Output metadata JSON (default: next to --out)")
+    p.add_argument("--no-tta", action="store_true", help="Skip the 3 extra test-time-augmentation passes "
+                   "(uncertainty only; the label map is identical either way)")
     args = p.parse_args(argv)
 
     if args.msd4d:
@@ -32,7 +34,7 @@ def main(argv=None) -> int:
             p.error(f"missing --{' --'.join(missing)} (or use --msd4d)")
         stack, ref = load_sequences(files)
 
-    record = run_case(stack, ref, args.out, files)
+    record = run_case(stack, ref, args.out, files, tta=not args.no_tta)
     meta_path = args.meta or args.out.with_name(args.out.name.split(".")[0] + "_meta.json")
     meta_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
 

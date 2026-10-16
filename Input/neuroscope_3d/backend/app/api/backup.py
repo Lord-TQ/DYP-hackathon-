@@ -25,7 +25,7 @@ def load_backup_study() -> str:
         shutil.copy2(BACKUP_DIR / name, study_dir / name)
         modalities[MODALITY_OF[seq]] = {"status": "valid", "filename": name, "path": str(study_dir / name),
                                         "shape": record["shape"], "zooms": record["spacing_mm"]}
-    for name in ("prediction.nii.gz", "prediction_meta.json", "expert.nii.gz"):
+    for name in ("prediction.nii.gz", "prediction_meta.json", "expert.nii.gz", "uncertainty_tta.nii.gz"):
         if (BACKUP_DIR / name).exists():
             shutil.copy2(BACKUP_DIR / name, study_dir / name)
     metadata = {"shape": record["shape"], "voxel_spacing_mm": record["spacing_mm"], "prediction": record,

@@ -77,7 +77,13 @@ def test_viewer_and_report_with_expert_mask():
         A = np.array(meta["canonical_affine"])
         assert A[0, 0] > 0 and A[1, 1] > 0 and A[2, 2] > 0
 
-        for name in ("flair", "pred", "expert"):
+        assert meta["has_uncertainty"] and meta["uncertainty"]["passes"] == 4
+        unc = np.frombuffer(client.get(f"/api/viewer/{sid}/volume/uncert").content, np.uint8)
+        assert unc.max() <= 4
+        abl = client.post(f"/api/viewer/{sid}/ablation").json()
+        assert set(abl["removed_sequence"]) == {"t1gd", "t1", "t2", "flair"} and "not clinical evidence" in abl["label"]
+
+        for name in ("flair", "pred", "expert", "uncert"):
             vol = client.get(f"/api/viewer/{sid}/volume/{name}")
             assert vol.status_code == 200 and len(vol.content) == X * Y * Z
         # expert volume in canonical order matches the uploaded mask reoriented
@@ -93,7 +99,8 @@ def test_viewer_and_report_with_expert_mask():
 
         page = client.get(f"/report/{sid}")
         assert page.status_code == 200
-        for text in ("Not a diagnosis", "SHA-256", "Formula", "Provenance", "Limitations", "Agreement"):
+        for text in ("Not a diagnosis", "SHA-256", "Formula", "Provenance", "Limitations", "Agreement",
+                     "How much to trust it", "not clinical evidence"):
             assert text in page.text
         pdf = client.get(f"/api/report/{sid}.pdf")
         assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"

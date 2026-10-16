@@ -42,7 +42,8 @@ PREPROCESSING = (
     "Stack sequences as [T1Gd, T1, T2, FLAIR]; reorient to RAS; resample to 1 mm isotropic (bilinear); "
     "z-score intensity normalisation per channel over non-zero voxels; sliding-window inference with AMP; "
     "sigmoid; invert resampling/orientation back to the input grid (bilinear on probabilities); "
-    "threshold 0.5; TC/WT/ET channels -> BraTS codes (ET=4, TC without ET=1, WT without TC=2)."
+    "threshold 0.5; TC/WT/ET channels -> BraTS codes (ET=4, TC without ET=1, WT without TC=2). "
+    "Uncertainty: 3 extra passes on the input mirrored along each axis (label map from the plain pass)."
 )
 
 LIMITATIONS = [
@@ -59,8 +60,10 @@ LIMITATIONS = [
     "Images coarser than 1 mm are resampled to 1 mm; thick-slice data reduces accuracy and volume precision.",
     "Volumes are estimates (voxel count x voxel volume) of the model's predicted regions, not measurements of "
     "the tumour, and inherit all segmentation errors.",
-    "Input suitability checks are simple heuristics (background fraction, tissue volume, mask agreement); passing "
-    "them does not guarantee the scan is appropriate.",
+    "Input suitability checks are simple heuristics (background fraction, tissue volume, mask agreement, size, "
+    "shape, texture); passing them does not guarantee the scan is appropriate.",
+    "The test-time-augmentation uncertainty only measures how the prediction changes when the scan is mirrored; a "
+    "confidently wrong region can be unanimous across passes. Modality ablation is not clinical evidence.",
 ]
 
 DISCLAIMER = (

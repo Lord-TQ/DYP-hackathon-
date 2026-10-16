@@ -85,9 +85,40 @@ if (FRONTEND_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
 
 
+STATIC_INDEX = Path(__file__).resolve().parent / "static" / "index.html"
+
+
+@app.get("/api/about", tags=["System"])
+def about():
+    """Model, device, evaluation summary and limitations, for the landing page."""
+    import torch
+
+    from app.services.report import load_evaluation
+    from brainseg.constants import LIMITATIONS, MODEL_INFO
+
+    ev = load_evaluation()
+    return {
+        "model": MODEL_INFO,
+        "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU",
+        "cuda": torch.cuda.is_available(),
+        "evaluation": {k: ev[k] for k in ("n_cases", "case_ids", "summary", "overlap_disclosure", "dataset")} if ev else None,
+        "limitations": LIMITATIONS,
+        "disclaimer": DISCLAIMER,
+        "upload_ttl_hours": round(study_store.ttl_seconds / 3600, 1),
+    }
+
+
+@app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
+async def serve_legacy():
+    """The earlier four-slot React upload page, kept for reference."""
+    return FileResponse(str(FRONTEND_INDEX), headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/", response_class=HTMLResponse, tags=["Web Interface"])
 async def serve_root():
-    """Serve the interactive web frontend at root URL."""
+    """Serve the landing page + analysis workflow."""
+    if STATIC_INDEX.exists():
+        return FileResponse(str(STATIC_INDEX), headers={"Cache-Control": "no-cache"})
     if FRONTEND_INDEX.exists():
         return FileResponse(str(FRONTEND_INDEX), headers={"Cache-Control": "no-cache"})
 

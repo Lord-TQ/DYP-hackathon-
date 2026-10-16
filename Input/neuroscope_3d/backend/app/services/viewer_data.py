@@ -23,6 +23,7 @@ from app.core.exceptions import NIfTIValidationError
 from app.services.study_store import ValidatedStudy, study_store
 
 from brainseg.constants import DISCLAIMER, LABEL_NAMES, MODEL_INFO, PREPROCESSING, REGIONS
+from brainseg.inference import UNCERTAINTY_FILENAME
 from brainseg.labels import region_masks, region_volumes
 
 SEQUENCE_KEYS = {"t1": "T1", "t1gd": "T1Gd", "t2": "T2", "flair": "FLAIR"}
@@ -31,10 +32,10 @@ PREDICTION_FILENAME = "prediction.nii.gz"
 CACHE_DIR = "viewer_cache"
 
 MESH_STYLE = {
-    "brain": {"label": "Brain surface", "color": "#c9ced6", "opacity": 0.18},
-    "NCR": {"label": "NCR (1) necrotic core", "color": "#e5484d", "opacity": 0.95},
-    "ED": {"label": "ED (2) oedema", "color": "#30a46c", "opacity": 0.45},
-    "ET": {"label": "ET (4) enhancing", "color": "#f5d90a", "opacity": 0.9},
+    "brain": {"label": "Brain surface", "color": "#d8d0c0", "opacity": 0.18},
+    "NCR": {"label": "NCR (1) necrotic core", "color": "#d6452c", "opacity": 0.95},
+    "ED": {"label": "ED (2) oedema", "color": "#78a870", "opacity": 0.45},
+    "ET": {"label": "ET (4) enhancing", "color": "#e8b030", "opacity": 0.9},
 }
 LABEL_CODES = {"NCR": 1, "ED": 2, "ET": 4}
 
@@ -134,6 +135,11 @@ def volume_bytes(study: ValidatedStudy, name: str) -> bytes:
         scaled = np.clip((data - lo) / max(hi - lo, 1e-6), 0, 1) * 255
         scaled[data == 0] = 0
         arr = scaled.astype(np.uint8)
+    elif name == "uncert":
+        path = Path(study.study_dir) / UNCERTAINTY_FILENAME
+        if not path.exists():
+            raise NIfTIValidationError("No uncertainty map for this study.", "NOT_AVAILABLE", status_code=404)
+        arr = np.asarray(nib.load(str(path), mmap=False).dataobj).astype(np.uint8)
     elif name in ("pred", "expert"):
         arr = _labels(study, name)
         if arr is None:
@@ -227,6 +233,10 @@ def meta(study: ValidatedStudy) -> Dict[str, Any]:
         "agreement": _agreement(pred, expert, spacing) if pred is not None and expert is not None else None,
         "suitability": study.metadata.get("suitability", {}),
         "backup": study.metadata.get("backup"),
+        "source_4d": study.metadata.get("source_4d"),
+        "uncertainty": record.get("uncertainty"),
+        "has_uncertainty": (Path(study.study_dir) / UNCERTAINTY_FILENAME).exists(),
+        "ablation": study.metadata.get("ablation"),
         "provenance": record.get("provenance"),
         "model": MODEL_INFO,
         "preprocessing": PREPROCESSING,

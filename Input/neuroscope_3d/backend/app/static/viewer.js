@@ -7,9 +7,11 @@ const studyId = decodeURIComponent(location.pathname.split('/').filter(Boolean).
 const $ = (s) => document.querySelector(s);
 const API = `/api/viewer/${encodeURIComponent(studyId)}`;
 
-const LABEL_RGB = { 1: [229, 72, 77], 2: [48, 164, 108], 4: [245, 217, 10] };
+const LABEL_RGB = { 1: [214, 69, 44], 2: [120, 168, 112], 4: [232, 176, 48] };
 const LABEL_NAME = { 0: 'background', 1: 'NCR (1)', 2: 'ED (2)', 4: 'ET (4)' };
-const AGREE_RGB = { both: [34, 197, 94], fp: [249, 115, 22], fn: [59, 130, 246] };
+const AGREE_RGB = { both: [120, 168, 112], fp: [214, 69, 44], fn: [111, 163, 181] };
+// how many of the 4 test-time-augmentation passes call a voxel WT
+const UNCERT_RGB = { 1: [214, 69, 44], 2: [232, 176, 48], 3: [226, 214, 160], 4: [120, 168, 112] };
 const REGION_CODES = { NCR: [1], ED: [2], ET: [4], TC: [1, 4], WT: [1, 2, 4] };
 
 const S = {
@@ -120,7 +122,8 @@ function renderSlice(V) {
     for (let u = 0; u < w; u++, p += 4) {
       const [x, y, z] = V.toVox(u, v), i = idx(x, y, z), g = bg ? bg[i] : 0;
       let c = null;
-      if (mode === 'pred' && pred && inCodes[pred[i]]) c = LABEL_RGB[pred[i]];
+      if (mode === 'uncert') { const u = S.vols.uncert; c = u && u[i] ? UNCERT_RGB[u[i]] : null; }
+      else if (mode === 'pred' && pred && inCodes[pred[i]]) c = LABEL_RGB[pred[i]];
       else if (mode === 'expert' && expert && inCodes[expert[i]]) c = LABEL_RGB[expert[i]];
       else if (mode.startsWith('agree-') && pred && expert) {
         const pm = region[pred[i]], em = region[expert[i]];
@@ -141,7 +144,7 @@ function drawCross(V) {
   const [w, h] = V.wh(), [u, v] = V.fromVox(S.cross), cw = V.cross.width, ch = V.cross.height;
   const px = ((u + 0.5) / w) * cw, py = ((v + 0.5) / h) * ch, g = V.cctx;
   g.clearRect(0, 0, cw, ch);
-  g.strokeStyle = 'rgba(56,189,248,0.85)'; g.lineWidth = Math.max(1, devicePixelRatio);
+  g.strokeStyle = 'rgba(242,237,227,0.8)'; g.lineWidth = Math.max(1, devicePixelRatio);
   g.beginPath(); g.moveTo(px, 0); g.lineTo(px, ch); g.moveTo(0, py); g.lineTo(cw, py); g.stroke();
 }
 
@@ -169,7 +172,7 @@ function init3D() {
   T.renderer = new THREE.WebGLRenderer({ antialias: true });
   T.renderer.setPixelRatio(devicePixelRatio);
   el.append(T.renderer.domElement);
-  T.scene = new THREE.Scene(); T.scene.background = new THREE.Color(0x000000);
+  T.scene = new THREE.Scene(); T.scene.background = new THREE.Color(0x0a0908);
   T.camera = new THREE.PerspectiveCamera(35, 1, 1, 5000); T.camera.up.set(0, 0, 1);
   T.scene.add(T.camera);
   T.scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -177,10 +180,10 @@ function init3D() {
   T.controls = new OrbitControls(T.camera, T.renderer.domElement);
   T.controls.enableDamping = true;
 
-  const mat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, depthTest: false });
+  const mat = new THREE.MeshBasicMaterial({ color: 0xf2ede3, depthTest: false });
   T.dot = new THREE.Mesh(new THREE.SphereGeometry(2.2, 16, 12), mat); T.dot.renderOrder = 10; T.scene.add(T.dot);
   T.lines = new THREE.LineSegments(new THREE.BufferGeometry(),
-    new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.7, depthTest: false }));
+    new THREE.LineBasicMaterial({ color: 0xf2ede3, transparent: true, opacity: 0.7, depthTest: false }));
   T.lines.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(18), 3));
   T.lines.renderOrder = 10; T.scene.add(T.lines);
 
@@ -209,7 +212,7 @@ function b64(s, Type) { const bin = atob(s), u8 = new Uint8Array(bin.length); fo
 
 function textSprite(text) {
   const c = document.createElement('canvas'); c.width = c.height = 64;
-  const g = c.getContext('2d'); g.font = 'bold 44px system-ui'; g.fillStyle = '#38bdf8'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  const g = c.getContext('2d'); g.font = '500 40px "IBM Plex Mono", monospace'; g.fillStyle = '#f2ede3'; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText(text, 32, 34);
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
   s.scale.set(14, 14, 1); s.renderOrder = 11; return s;
@@ -307,6 +310,33 @@ function renderTables() {
     </table></div>` : '';
 }
 
+function renderTrust(m) {
+  const u = m.uncertainty, parts = [];
+  if (u) {
+    const row = (r) => { const x = u.regions[r]; const dmin = Math.min(...x.dice_vs_main_per_pass);
+      return `<tr><td>${r}</td><td>${x.volume_mL_min.toFixed(1)}–${x.volume_mL_max.toFixed(1)}</td><td>${dmin.toFixed(3)}</td></tr>`; };
+    parts.push(`<p>Test-time augmentation: the model was re-run on the scan mirrored along each axis (${u.passes} passes).
+      <b>${(u.wt_uncertain_fraction * 100).toFixed(1)}%</b> of WT voxels are disputed between passes.</p>
+      <table class="kv"><tr><td>Region</td><td>mL range</td><td>min Dice</td></tr>${['WT', 'TC', 'ET'].map(row).join('')}</table>
+      <p class="muted">Choose “Uncertainty (TTA, WT)” under Slices to see where.</p>`);
+  } else {
+    parts.push('<p class="muted">No test-time-augmentation result for this study.</p>');
+  }
+  if (m.agreement) parts.push(`<p>Against the supplied expert mask: WT Dice <b>${m.agreement.WT.dice.toFixed(3)}</b>.</p>`);
+  $('#trust').innerHTML = parts.join('');
+  renderAblation(m.ablation);
+}
+
+function renderAblation(a) {
+  if (!a) { $('#ablation').innerHTML = ''; return; }
+  $('#run-ablation').hidden = true;
+  const rows = Object.entries(a.removed_sequence).map(([s, v]) =>
+    `<tr><td>without ${s.toUpperCase()}</td>${['WT', 'TC', 'ET'].map((r) => `<td>${v[r].dice_vs_full.toFixed(2)}</td>`).join('')}</tr>`).join('');
+  $('#ablation').innerHTML = `<p style="margin-top:10px"><b>${a.label}</b></p>
+    <table class="kv"><tr><td>Dice vs full input</td><td>WT</td><td>TC</td><td>ET</td></tr>${rows}</table>
+    <p class="muted">${a.method}</p>`;
+}
+
 function applyMeta(m) {
   S.meta = m;
   [S.X, S.Y, S.Z] = m.canonical_shape; S.sp = m.canonical_spacing_mm;
@@ -319,7 +349,11 @@ function applyMeta(m) {
   const w = m.suitability?.warnings || [];
   $('#warnings').hidden = !w.length;
   $('#warnings').innerHTML = w.length ? `<b>Input suitability warnings</b><ul>${w.map((x) => `<li>${x}</li>`).join('')}</ul>` : '';
-  for (const o of $('#overlay').options) if (o.value !== 'pred' && o.value !== 'none') o.disabled = !m.has_expert;
+  for (const o of $('#overlay').options) {
+    if (o.value === 'uncert') o.disabled = !m.has_uncertainty;
+    else if (o.value !== 'pred' && o.value !== 'none') o.disabled = !m.has_expert;
+  }
+  renderTrust(m);
   $('#c-expert-row').hidden = !m.has_expert;
   $('#disclaimer').textContent = m.disclaimer;
   renderTables();
@@ -349,8 +383,12 @@ $('#bg-seq').addEventListener('change', async (e) => {
   try { status('Loading sequence…'); await getVol(e.target.value); S.bg = e.target.value; setCross(S.cross); status('Ready.'); }
   catch (err) { status(err.message, true); }
 });
-$('#overlay').addEventListener('change', (e) => {
+$('#overlay').addEventListener('change', async (e) => {
+  if (e.target.value === 'uncert') {
+    try { await getVol('uncert'); } catch (err) { status(err.message, true); return; }
+  }
   S.overlay = e.target.value; $('#agree-legend').hidden = !S.overlay.startsWith('agree-');
+  $('#uncert-legend').hidden = S.overlay !== 'uncert';
   $('#label-toggles').style.opacity = S.overlay.startsWith('agree-') ? 0.4 : 1; renderAllSlices();
 });
 $('#ov-alpha').addEventListener('input', (e) => { S.alpha = Number(e.target.value); renderAllSlices(); });
@@ -373,6 +411,11 @@ $('#expert-file').addEventListener('change', async (e) => {
     msg.textContent = 'Expert mask attached. Choose "Expert mask" or "Agreement" under Slices; expert surfaces are in 3D layers.';
   } catch (err) { msg.textContent = `Rejected: ${err.message}`; }
   e.target.value = '';
+});
+$('#run-ablation').addEventListener('click', async (e) => {
+  e.target.disabled = true; e.target.textContent = 'Running 5 passes…';
+  try { renderAblation(await getJSON(`${API}/ablation`, { method: 'POST' })); }
+  catch (err) { $('#ablation').textContent = err.message; e.target.disabled = false; e.target.textContent = 'Run modality ablation'; }
 });
 window.addEventListener('resize', layoutSlices);
 main();

@@ -1,4 +1,5 @@
 """Run the pretrained MONAI SegResNet on one case and return a BraTS label map on the input grid."""
+import copy
 import datetime
 import hashlib
 import subprocess
@@ -13,12 +14,13 @@ from monai.inferers import sliding_window_inference
 from monai.networks.nets import SegResNet
 from monai.transforms import Compose, NormalizeIntensity, Orientation, Spacing
 
-from .constants import (
+from .constants import (  # noqa: F401
     CHECKPOINT, DISCLAIMER, MODEL_INFO, MODEL_INPUT_ORDER, MSD_CHANNEL_ORDER, PREPROCESSING, ROOT,
 )
 from .labels import channels_to_brats, region_volumes
 
 ROI_SIZES = [(240, 240, 160), (128, 128, 128)]  # largest first; smaller fallback for low-memory GPUs
+UNCERTAINTY_FILENAME = "uncertainty_tta.nii.gz"  # per voxel: how many of the 4 TTA passes call it WT
 
 
 def sha256(path) -> str:
@@ -113,8 +115,15 @@ def _infer(x: torch.Tensor, device) -> torch.Tensor:
     raise RuntimeError(f"Inference failed on all devices: {last_err}")
 
 
-def predict(stack: np.ndarray, affine: np.ndarray, device=None):
-    """Return (BraTS uint8 label map on the input grid, info dict)."""
+TTA_PASSES = (("none", ()), ("flip L-R", (1,)), ("flip A-P", (2,)), ("flip S-I", (3,)))
+
+
+def predict(stack: np.ndarray, affine: np.ndarray, device=None, tta: bool = False):
+    """Return (BraTS uint8 label map on the input grid, info dict).
+
+    The label map always comes from the plain (un-augmented) pass. With tta=True the network is also run on
+    the volume mirrored along each axis (mirrored back afterwards); info["tta"] then holds the per-pass label
+    maps' agreement count (0-4, on the input grid) and per-pass volumes, as an uncertainty estimate."""
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     spatial = Compose([
         Orientation(axcodes="RAS", labels=(("L", "R"), ("P", "A"), ("I", "S"))),
@@ -124,36 +133,101 @@ def predict(stack: np.ndarray, affine: np.ndarray, device=None):
     img = spatial(MetaTensor(torch.tensor(stack), affine=torch.as_tensor(affine, dtype=torch.float64)))
     x = NormalizeIntensity(nonzero=True, channel_wise=True)(img.as_tensor())
 
-    probs, where = _infer(x, device)
+    def to_labels(probs_canonical):
+        pred = MetaTensor(probs_canonical, meta=img.meta)
+        pred.applied_operations = copy.deepcopy(img.applied_operations)  # inverse() pops from this list
+        probs = spatial.inverse(pred).as_tensor().numpy()
+        if probs.shape[1:] != stack.shape[1:]:
+            raise RuntimeError(f"Restored grid {probs.shape[1:]} != input grid {stack.shape[1:]}")
+        tc, wt, et = (probs[i] > 0.5 for i in range(3))
+        return channels_to_brats(tc, wt, et)
 
-    pred = MetaTensor(probs, meta=img.meta)
-    pred.applied_operations = img.applied_operations
-    probs = spatial.inverse(pred).as_tensor().numpy()
-    if probs.shape[1:] != stack.shape[1:]:
-        raise RuntimeError(f"Restored grid {probs.shape[1:]} != input grid {stack.shape[1:]}")
+    passes = TTA_PASSES if tta else TTA_PASSES[:1]
+    label_maps, where = [], None
+    for _, dims in passes:
+        xi = torch.flip(x, dims) if dims else x
+        probs, where = _infer(xi, device)
+        label_maps.append(to_labels(torch.flip(probs, dims) if dims else probs))
 
-    tc, wt, et = (probs[i] > 0.5 for i in range(3))
-    return channels_to_brats(tc, wt, et), {"device": where}
+    info = {"device": where}
+    if tta:
+        info["tta"] = {"passes": [name for name, _ in passes], "label_maps": label_maps}
+    return label_maps[0], info
 
 
-def run_case(stack, ref: nib.Nifti1Image, out_path, input_files: dict, device=None) -> dict:
-    """Predict, save the NIfTI label map on the input grid/affine, and return the metadata record."""
-    t0 = time.perf_counter()
-    labels, info = predict(stack, ref.affine, device)
-    elapsed = time.perf_counter() - t0
+def tta_summary(label_maps, spacing) -> tuple:
+    """Agreement map (number of passes calling each voxel WT) and per-region volume spread / overlap."""
+    from .labels import region_masks
+    from .metrics import dice
 
+    masks = [region_masks(m) for m in label_maps]
+    agree = np.sum([m["WT"] for m in masks], axis=0).astype(np.uint8)
+    n = len(label_maps)
+    summary = {"passes": n, "regions": {}}
+    for r in ("WT", "TC", "ET"):
+        vols = [region_volumes(m, spacing)[r]["mL"] for m in label_maps]
+        summary["regions"][r] = {
+            "volume_mL_per_pass": [round(v, 3) for v in vols],
+            "volume_mL_min": round(min(vols), 3), "volume_mL_max": round(max(vols), 3),
+            "dice_vs_main_per_pass": [round(dice(masks[k][r], masks[0][r]), 4) for k in range(1, n)],
+        }
+    any_wt, all_wt = agree > 0, agree == n
+    summary["wt_uncertain_fraction"] = round(float((any_wt & ~all_wt).sum() / max(any_wt.sum(), 1)), 4)
+    summary["wt_unanimous_mL"] = round(float(all_wt.sum() * np.prod(spacing[:3]) / 1000), 3)
+    summary["wt_any_mL"] = round(float(any_wt.sum() * np.prod(spacing[:3]) / 1000), 3)
+    return agree, summary
+
+
+def modality_ablation(stack: np.ndarray, affine: np.ndarray, spacing, device=None) -> dict:
+    """Re-run the model with each input sequence zeroed and compare with the full-input prediction.
+    Shows which sequences this model relies on for this case. NOT clinical evidence."""
+    from .metrics import dice
+    from .labels import region_masks
+
+    base, _ = predict(stack, affine, device)
+    base_m, base_v = region_masks(base), region_volumes(base, spacing)
+    out = {}
+    for i, seq in enumerate(MODEL_INPUT_ORDER):
+        s = stack.copy()
+        s[i] = 0
+        lab, _ = predict(s, affine, device)
+        m, v = region_masks(lab), region_volumes(lab, spacing)
+        out[seq] = {r: {"dice_vs_full": round(dice(m[r], base_m[r]), 4), "volume_mL": round(v[r]["mL"], 3),
+                        "volume_change_mL": round(v[r]["mL"] - base_v[r]["mL"], 3)} for r in ("WT", "TC", "ET")}
+    return {"label": "Modality ablation — not clinical evidence", "removed_sequence": out,
+            "method": "Each sequence in turn is replaced by zeros before inference; Dice compares the result with "
+                      "the full-input prediction. It shows what this model relies on, not what is in the patient."}
+
+
+def _save_like(arr, ref, path):
     header = ref.header.copy()
     header.set_data_dtype(np.uint8)
     header.set_slope_inter(1, 0)
-    out = nib.Nifti1Image(labels, ref.affine, header)
+    out = nib.Nifti1Image(arr.astype(np.uint8), ref.affine, header)
     out.set_qform(ref.get_qform(), code=int(ref.header["qform_code"]) or 1)
     out.set_sform(ref.get_sform(), code=int(ref.header["sform_code"]) or 1)
+    nib.save(out, str(path))
+
+
+def run_case(stack, ref: nib.Nifti1Image, out_path, input_files: dict, device=None, tta: bool = True) -> dict:
+    """Predict, save the NIfTI label map (and TTA agreement map) on the input grid/affine, return the record."""
+    t0 = time.perf_counter()
+    labels, info = predict(stack, ref.affine, device, tta=tta)
+    elapsed = time.perf_counter() - t0
+
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    nib.save(out, str(out_path))
+    _save_like(labels, ref, out_path)
 
     spacing = [float(z) for z in ref.header.get_zooms()[:3]]
+    uncertainty = None
+    if "tta" in info:
+        agree, uncertainty = tta_summary(info["tta"]["label_maps"], spacing)
+        uncertainty["passes_names"] = info["tta"]["passes"]
+        uncertainty["agreement_file"] = UNCERTAINTY_FILENAME
+        _save_like(agree, ref, out_path.with_name(UNCERTAINTY_FILENAME))
     return {
+        "uncertainty": uncertainty,
         "prediction_file": out_path.name,
         "label_codes": {"0": "background", "1": "NCR", "2": "ED", "4": "ET"},
         "shape": list(labels.shape),
@@ -169,6 +243,8 @@ def run_case(stack, ref: nib.Nifti1Image, out_path, input_files: dict, device=No
             "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
             "device": info["device"],
             "inference_seconds": round(elapsed, 2),
+            "test_time_augmentation": "4 passes (none, flip L-R, A-P, S-I); label map from the un-augmented pass"
+            if tta else "off",
         },
         "disclaimer": DISCLAIMER,
     }

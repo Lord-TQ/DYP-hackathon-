@@ -103,7 +103,7 @@ class SegmentationEngine:
         with _GPU_LOCK:  # one inference at a time on the GPU
             record = run_case(stack, ref, out_path, files)
         for f in (Path(study.study_dir) / "viewer_cache").glob("*"):
-            if f.name.startswith(("pred", "meshes")):
+            if f.name.startswith(("pred", "meshes", "uncert")):
                 f.unlink()
         (study.study_dir / METADATA_FILENAME).write_text(json.dumps(record, indent=2), encoding="utf-8")
         study.metadata["prediction"] = record
@@ -133,6 +133,7 @@ class SegmentationEngine:
             "spacing_mm": record["spacing_mm"],
             "affine": record["affine"],
             "provenance": record["provenance"],
+            "uncertainty": record.get("uncertainty"),
             "warnings": study.metadata.get("suitability", {}).get("warnings", []),
             "viewer_url": f"/viewer/{study_id}",
             "report_url": f"/report/{study_id}",

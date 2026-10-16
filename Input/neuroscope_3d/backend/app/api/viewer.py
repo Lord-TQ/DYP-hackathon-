@@ -64,6 +64,26 @@ def upload_expert_mask(study_id: str, file: UploadFile = File(...)):
         return _error(e)
 
 
+@router.post("/api/viewer/{study_id}/ablation",
+             summary="Modality ablation: re-run with each sequence zeroed (not clinical evidence); cached per study")
+def run_ablation(study_id: str):
+    from app.services.segmentation_engine import _GPU_LOCK
+    from app.services.study_store import study_store
+    from brainseg.inference import load_sequences, modality_ablation
+
+    try:
+        study = _require_prediction(study_id)
+    except NIfTIValidationError as e:
+        return _error(e)
+    if not study.metadata.get("ablation"):
+        files = {k: study.modalities[v]["path"] for k, v in viewer_data.SEQUENCE_KEYS.items()}
+        stack, ref = load_sequences(files)
+        with _GPU_LOCK:
+            study.metadata["ablation"] = modality_ablation(stack, ref.affine, ref.header.get_zooms()[:3])
+        study_store.persist(study)
+    return study.metadata["ablation"]
+
+
 def _require_prediction(study_id: str):
     study = viewer_data.get_study(study_id)
     if viewer_data._labels(study, "pred") is None:

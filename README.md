@@ -4,10 +4,15 @@
 > *estimated volumes*. Not a diagnosis; not clinically validated; not for clinical use. Use only public,
 > de-identified research data. Uploads are deleted automatically within 24 hours.
 
-Upload one MRI study (T1, T1Gd, T2, FLAIR as NIfTI), run a pretrained MONAI SegResNet, view the predicted
-NCR / ED / ET regions as 3D meshes in world millimetres and in linked axial / coronal / sagittal slices, read the
-estimated volumes with their formula, compare with an optional expert mask, and download a NIfTI label map and a
-report (HTML / PDF).
+Upload one MRI study (T1, T1Gd, T2, FLAIR as four NIfTI files, **or one 4-channel NIfTI** that is split on the
+server), run a pretrained MONAI SegResNet, view the predicted NCR / ED / ET regions as 3D meshes in world millimetres
+and in linked axial / coronal / sagittal slices, read the estimated volumes with their formula, compare with an
+optional expert mask, and download a NIfTI label map and a report (HTML / PDF).
+
+**How much to trust it:** every run adds test-time augmentation (the scan mirrored along each axis, 4 passes) and
+reports the volume range and the share of disputed WT voxels, with an uncertainty overlay in the viewer. An on-demand
+modality ablation (each sequence zeroed in turn) shows which sequences the model relied on — labelled *not clinical
+evidence*. Agreement with an expert mask is colour-coded, with Dice, sensitivity and HD95 in mm.
 
 ## Quick start
 
@@ -41,7 +46,8 @@ curl -f -o prediction.nii.gz -D - -F t1=@T1.nii.gz -F t1gd=@T1Gd.nii.gz -F t2=@T
      http://localhost:8000/api/segmentation/predict
 ```
 
-**Step by step**: `POST /api/upload/validate` → `study_id`; `POST /api/segmentation/run {"study_id": …}` →
+**Step by step**: `POST /api/upload/validate` (four files) or `POST /api/upload/validate-4d` (field `file`, one
+X×Y×Z×4 NIfTI; `channel_order`, default `FLAIR,T1,T1Gd,T2` = Decathlon order) → `study_id`; `POST /api/segmentation/run {"study_id": …}` →
 volumes + URLs; `GET /api/segmentation/prediction/{id}` (NIfTI); `GET /viewer/{id}`; `GET /report/{id}`;
 `GET /api/report/{id}.pdf`; `POST /api/viewer/{id}/expert` (attach expert mask later).
 
@@ -88,6 +94,22 @@ Results, case list (patient-wise; one study per subject) and the training-overla
 evaluation cases, so these numbers are optimistic.** We did not train or tune on any data, and never train on,
 tune on or keep judge-provided cases.
 
+## Judge test pack (self-check)
+
+`python tests/judge_scenarios.py http://localhost:8000 demo_cases/BRATS_002` replays the scoring table on a real
+case through the running server. Last run: 8/8 —
+
+| Scenario | Result |
+|---|---|
+| Reproducibility (same case twice) | WT Dice 1.0000 |
+| Anisotropic (every 2nd axial slice removed) | WT 67.74 → 69.61 mL (+2.8 %) |
+| Volume cube (20³ voxels, label 2, 1×1×2 mm) | expert WT 16.000 mL, TC 0, ET 0 |
+| Orientation, same anatomy (flipped voxels + affine) | same side, WT +0.00 % |
+| Orientation, mirrored anatomy | tumour switches side |
+| Linked-view coordinate round trip | exact |
+| Not skull-stripped | refused (`UNSUITABLE_INPUT`) |
+| Not a brain (cylinder phantom) | 3 warnings (size, shape, texture) |
+
 ## Tests
 
 ```bash
@@ -121,5 +143,8 @@ is derived from **BraTS** 2016/2017; the model was trained on **BraTS 2018**.
   radiomic features." *Scientific Data* 4:170117 (2017).
 - Bakas S. et al. "Identifying the best machine learning algorithms for brain tumor segmentation, progression
   assessment, and overall survival prediction in the BRATS challenge." arXiv:1811.02629 (2018).
-- Baid U. et al. "The RSNA-ASNR-MICCAI BraTS 2021 Benchmark on Brain Tumor Segmentation and Radiogenomic
-  Classification." arXiv:2107.02314 (2021) — cite if BraTS 2021 cases are used (e.g. judges' test cases).
+- **BraTS 2021:** Baid U. et al. "The RSNA-ASNR-MICCAI BraTS 2021 Benchmark on Brain Tumor Segmentation and
+  Radiogenomic Classification." arXiv:2107.02314 (2021). Data: DOI [10.7937/jc8x-9874](https://doi.org/10.7937/jc8x-9874)
+  (CC BY 4.0, TCIA) — the judges' development and test cases use BraTS 2021 conventions (labels 1/2/4).
+- Medical Segmentation Decathlon data: CC BY-SA 4.0. The landing-page sweep image (`app/static/hero/plate.jpg`) is
+  rendered from Decathlon case BRATS_001 with this project's prediction.

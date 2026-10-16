@@ -22,6 +22,11 @@
 - Output: `uint8` NIfTI on the **input grid and affine**, BraTS codes **1 = NCR, 2 = ED, 4 = ET** (ET → 4; TC without
   ET → 1; WT without TC → 2). Regions: WT = {1,2,4}, TC = {1,4}, ET = {4}.
 - Volumes: voxel count × voxel volume (product of header spacing), mm³ → mL ÷ 1000.
+- Uncertainty: 3 extra test-time-augmentation passes (input mirrored L-R, A-P, S-I, output mirrored back). The label
+  map always comes from the plain pass; TTA gives a per-voxel WT agreement map (0–4) and per-region volume ranges.
+- Input checks before inference: structural (readable, 3D, finite, non-constant, ≤ 1 GB, matching shape/affine);
+  refusal if not skull-stripped (zero background < 5 % or tissue > 2.6 L); warnings for implausible size, brain-unlike
+  shape (bounding-box fill outside 0.36–0.52) or unusually smooth texture — thresholds calibrated on 41 Decathlon brains.
 
 ## Evaluation
 
@@ -49,4 +54,5 @@ Our metrics are therefore optimistic, not an independent estimate.
   none (BRATS_175: WT Dice 0.47, TC 0.06, ET 0.00; BRATS_169: ET Dice 0.01).
 - Non-1 mm or thick-slice data is resampled; accuracy and volume precision drop.
 - Volumes inherit all segmentation errors; they are estimates of predicted regions, not tumour measurements.
-- Sigmoid outputs are not calibrated probabilities; no uncertainty estimate is provided.
+- Sigmoid outputs are not calibrated probabilities. Flip-TTA agreement measures sensitivity to mirroring only; it
+  under-states true error (a confidently wrong region is unanimous across passes).
