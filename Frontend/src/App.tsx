@@ -107,17 +107,9 @@ function NavBar({
 
   return (
     <header className={`site-header ${isViewer ? "viewer-nav" : ""}`}>
-      <Brand onNavigate={onNavigate} />
-
-      <button
-        type="button"
-        className="mobile-menu"
-        onClick={() => setMobileOpen(!mobileOpen)}
-        aria-expanded={mobileOpen}
-        aria-label="Toggle navigation menu"
-      >
-        {mobileOpen ? "✕" : "Menu"}
-      </button>
+      <div className="nav-col-left">
+        <Brand onNavigate={onNavigate} />
+      </div>
 
       <nav className={mobileOpen ? "open" : ""}>
         <a
@@ -161,6 +153,18 @@ function NavBar({
           About & safety
         </a>
       </nav>
+
+      <div className="nav-col-right">
+        <button
+          type="button"
+          className="mobile-menu"
+          onClick={() => setMobileOpen(!mobileOpen)}
+          aria-expanded={mobileOpen}
+          aria-label="Toggle navigation menu"
+        >
+          {mobileOpen ? "✕" : "Menu"}
+        </button>
+      </div>
     </header>
   )
 }
