@@ -22,10 +22,10 @@ img { max-width: 100%; border: 1px solid var(--fg); }
 </style></head><body>
 <div class=disclaimer>Research and teaching prototype. Outputs are suspected tumour regions predicted by the model and estimated volumes. Not a diagnosis; not clinically validated; not for clinical use.</div>
 
-<p class=toolbar><a href="/api/report/brats_d6fff866ad9e7f57cfde022984eda4dc.pdf">Download PDF</a><a href="/viewer/brats_d6fff866ad9e7f57cfde022984eda4dc">Open viewer</a>
-<a href="/api/segmentation/prediction/brats_d6fff866ad9e7f57cfde022984eda4dc">Prediction NIfTI</a></p>
+<p class=toolbar><a href="/api/report/brats_c8cb31879eb82a9883448d96d8588e43.pdf">Download PDF</a><a href="/viewer/brats_c8cb31879eb82a9883448d96d8588e43">Open viewer</a>
+<a href="/api/segmentation/prediction/brats_c8cb31879eb82a9883448d96d8588e43">Prediction NIfTI</a></p>
 <h1>NeuroScope 3D — estimated tumour-region volumes</h1>
-<p class=muted>Study brats_d6fff866ad9e7f57cfde022984eda4dc · report generated 2026-10-16T21:06:00+00:00</p>
+<p class=muted>Study brats_c8cb31879eb82a9883448d96d8588e43 · report generated 2026-10-16T21:40:29+00:00</p>
 
 <h2>Input</h2>
 <table><tr><th>Sequence</th><th>File</th><th>SHA-256</th></tr><tr><td>t1gd</td><td>T1Gd_BRATS_002_t1ce.nii.gz</td><td class=mono>19753d7b6f90b4b37a6df89d6381d6b17408439e6feec31e726da7cb36499471</td></tr><tr><td>t1</td><td>T1_BRATS_002_t1.nii.gz</td><td class=mono>8974b0b277957b6f267bb220e18e2eeac04bfdf0d14503e67e64781eb7a39087</td></tr><tr><td>t2</td><td>T2_BRATS_002_t2.nii.gz</td><td class=mono>8f85bd990b11f2d48522e1e50e07dbc187badb728da2d6c8d39245582e74cf5e</td></tr><tr><td>flair</td><td>FLAIR_BRATS_002_flair.nii.gz</td><td class=mono>ffc10ff02fa68a60cf3cda2d72a75480d120531e9393bdc965c407dbe81e9168</td></tr></table>
@@ -49,9 +49,9 @@ Expert mask: supplied.</p>
 <tr><td>Licence</td><td>Apache-2.0 (MONAI Consortium)</td></tr>
 <tr><td>Model training data</td><td>BraTS 2018 (285 cases; bundle authors&#x27; own split)</td></tr>
 <tr><td>Preprocessing</td><td>Stack sequences as [T1Gd, T1, T2, FLAIR]; reorient to RAS; resample to 1 mm isotropic (bilinear); z-score intensity normalisation per channel over non-zero voxels; sliding-window inference with AMP; sigmoid; invert resampling/orientation back to the input grid (bilinear on probabilities); threshold 0.5; TC/WT/ET channels -&gt; BraTS codes (ET=4, TC without ET=1, WT without TC=2). Uncertainty: 3 extra passes on the input mirrored along each axis (label map from the plain pass).</td></tr>
-<tr><td>Code commit</td><td class=mono>f0429c60da636a45297181667c012bc1cbdf178a</td></tr>
-<tr><td>Inference timestamp (UTC)</td><td>2026-10-16T21:05:38+00:00</td></tr>
-<tr><td>Device / inference time</td><td>cuda roi=(240, 240, 160) / 4.81 s</td></tr>
+<tr><td>Code commit</td><td class=mono>7710088f75646d91cc4a230df1df7c036486c558</td></tr>
+<tr><td>Inference timestamp (UTC)</td><td>2026-10-16T21:40:17+00:00</td></tr>
+<tr><td>Device / inference time</td><td>cuda roi=(240, 240, 160) / 4.21 s</td></tr>
 </table>
 
 <h2>Limitations</h2><ul><li>Research and teaching prototype; not clinically validated and not approved for any clinical use. It does not provide diagnosis, grading, prognosis, treatment or surgical/radiotherapy planning.</li><li>The pretrained model was trained by the MONAI team on BraTS 2018 (adult glioma, pre-operative, skull-stripped, co-registered, 1 mm). It may fail on other tumour types (metastases, meningioma, paediatric tumours), post-operative scans, non-skull-stripped or non-co-registered images, unusual contrast, motion or other artefacts.</li><li>Evaluation cases come from the Medical Segmentation Decathlon Task01, which derives from BraTS 2016/2017; most are likely included in the model&#x27;s BraTS 2018 training data, so reported Dice/sensitivity are optimistic.</li><li>Enhancing tumour (ET) and necrotic core (NCR) are small, low-contrast regions and are the least reliable; ET can be missed entirely or predicted where an expert would mark none (in our evaluation, non-enhancing tumours such as BRATS_175 and BRATS_169 received spurious ET/TC predictions).</li><li>Images coarser than 1 mm are resampled to 1 mm; thick-slice data reduces accuracy and volume precision.</li><li>Volumes are estimates (voxel count x voxel volume) of the model&#x27;s predicted regions, not measurements of the tumour, and inherit all segmentation errors.</li><li>Input suitability checks are simple heuristics (background fraction, tissue volume, mask agreement, size, shape, texture); passing them does not guarantee the scan is appropriate.</li><li>The test-time-augmentation uncertainty only measures how the prediction changes when the scan is mirrored; a confidently wrong region can be unanimous across passes. Modality ablation is not clinical evidence.</li></ul>
