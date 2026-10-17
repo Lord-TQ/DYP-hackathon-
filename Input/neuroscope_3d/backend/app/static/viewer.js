@@ -96,9 +96,64 @@ function buildSlicePanels() {
     panel.addEventListener('pointerenter', () => { S.hover = name; });
     panel.addEventListener('pointerleave', () => { if (S.hover === name) S.hover = null; });
     buildSliceControls(name, V, panel);
+    if (!V.ro) { V.ro = new ResizeObserver(() => layoutSlices()); V.ro.observe(box); }   // follows enlarge / full screen
   }
   layoutSlices();
 }
+
+// ------------------------------------------------------------------ enlarge / full screen (every view)
+// Enlarge: the chosen view takes most of the grid; the other three stay live beside it and the side controls stay
+// where they are. Full screen: the browser's full-screen mode for that one view (Esc leaves it).
+const ICON = {
+  enlarge: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
+  restore: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4l-6 6M14 4v6h6M4 20l6-6M10 20v-6H4"/></svg>',
+  full: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+  unfull: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>',
+};
+const panelName = (p) => (p.dataset.view ? p.dataset.view[0].toUpperCase() + p.dataset.view.slice(1) : '3D');
+
+function buildPanelTools() {
+  for (const panel of document.querySelectorAll('.views .panel')) {
+    const tools = document.createElement('div');
+    tools.className = 'ptools';
+    tools.innerHTML = '<button type="button" class="pt-enlarge"></button><button type="button" class="pt-full"></button>';
+    panel.append(tools);
+    tools.querySelector('.pt-enlarge').addEventListener('click', () => setFocus(panel.classList.contains('big') ? null : panel));
+    tools.querySelector('.pt-full').addEventListener('click', () => toggleFullscreen(panel));
+    panel.addEventListener('pointerenter', () => { S.hoverPanel = panel; });
+    panel.addEventListener('pointerleave', () => { if (S.hoverPanel === panel) S.hoverPanel = null; });
+  }
+  if (!document.fullscreenEnabled) document.querySelectorAll('.pt-full').forEach((b) => { b.hidden = true; });
+  updatePanelTools();
+}
+
+function updatePanelTools() {
+  for (const panel of document.querySelectorAll('.views .panel')) {
+    const n = panelName(panel), big = panel.classList.contains('big'), full = document.fullscreenElement === panel;
+    const e = panel.querySelector('.pt-enlarge'), f = panel.querySelector('.pt-full');
+    if (!e) continue;
+    e.innerHTML = big ? ICON.restore : ICON.enlarge;
+    e.title = big ? 'Back to the four-view grid (Esc)' : `Enlarge the ${n} view (F)`;
+    e.setAttribute('aria-label', e.title); e.setAttribute('aria-pressed', String(big));
+    f.innerHTML = full ? ICON.unfull : ICON.full;
+    f.title = full ? 'Leave full screen (Esc)' : `Show the ${n} view full screen`;
+    f.setAttribute('aria-label', f.title);
+  }
+}
+
+function setFocus(panel) {
+  const views = $('.views');
+  views.querySelectorAll('.panel').forEach((p) => p.classList.toggle('big', p === panel));
+  views.classList.toggle('focus', !!panel);
+  updatePanelTools();
+  if (panel) views.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function toggleFullscreen(panel) {
+  if (document.fullscreenElement === panel) document.exitFullscreen();
+  else panel.requestFullscreen?.().catch((err) => status(`Full screen is not available: ${err.message}`, true));
+}
+document.addEventListener('fullscreenchange', () => { updatePanelTools(); layoutSlices(); });
 
 // Slider + step buttons + play under each slice view; the strip behind the slider shows, per slice, how much of
 // the predicted region (WT) it contains, so the tumour's extent along that axis is visible at a glance.
@@ -261,7 +316,9 @@ function buildGallery() {
   if (!box) return;
   const name = $('#g-axis').value, V = VIEWS[name], n = [S.X, S.Y, S.Z][V.axis];
   const onlyRegion = $('#g-filter').value === 'region';
-  const [w, h] = V.wh(), [mw, mh] = V.mm(), step = Math.max(1, Math.ceil(Math.max(w, h) / 112));
+  const size = Number($('#g-size')?.value || 104);
+  box.style.setProperty('--thumb', `${size}px`);
+  const [w, h] = V.wh(), [mw, mh] = V.mm(), step = Math.max(1, Math.ceil(Math.max(w, h) / (size * 1.08)));
   if (G.io) G.io.disconnect();
   G.io = new IntersectionObserver((ents) => ents.forEach((e) => e.isIntersecting && drawThumb(e.target)),
     { root: box, rootMargin: '160px' });
@@ -271,12 +328,16 @@ function buildGallery() {
     const has = S.prof ? S.prof[V.axis][k] > 0 : false;
     if (onlyRegion && !has) continue;
     const area = sliceAreaCM2(V.axis, k);
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = `thumb${has ? ' has' : ''}`; b.dataset.k = k;
-    b.setAttribute('aria-label', `${name} slice ${k + 1}${area ? `, predicted region ${area.toFixed(1)} cm²` : ''}`);
-    b.innerHTML = `<canvas width="${Math.floor(w / step)}" height="${Math.floor(h / step)}" style="aspect-ratio:${mw} / ${mh}"></canvas>
-      <span>${k + 1}${area ? ` · ${area.toFixed(1)} cm²` : ''}</span>`;
-    b.addEventListener('click', () => setSlice(V, k));
+    const b = document.createElement('div');
+    b.className = `thumb${has ? ' has' : ''}`; b.dataset.k = k;
+    b.innerHTML = `<button type="button" class="thumb-go"
+        aria-label="${name} slice ${k + 1}${area ? `, predicted region ${area.toFixed(1)} cm²` : ''}: move the crosshair here">
+        <canvas width="${Math.floor(w / step)}" height="${Math.floor(h / step)}" style="aspect-ratio:${mw} / ${mh}"></canvas>
+        <span>${k + 1}${area ? ` · ${area.toFixed(1)} cm²` : ''}</span></button>
+      <button type="button" class="thumb-zoom" title="Enlarge this slice" aria-label="Enlarge ${name} slice ${k + 1}">${ICON.enlarge}</button>`;
+    b.querySelector('.thumb-go').addEventListener('click', () => setSlice(V, k));
+    b.querySelector('.thumb-go').addEventListener('dblclick', () => openLightbox(name, k));
+    b.querySelector('.thumb-zoom').addEventListener('click', () => openLightbox(name, k));
     box.append(b); G.thumbs.push(b); G.io.observe(b);
   }
   $('#g-count').textContent = G.thumbs.length
@@ -312,9 +373,55 @@ function markGalleryCurrent() {
   for (const b of G.thumbs) b.classList.toggle('current', b.dataset.k === k);
 }
 
+// Lightbox: one slice at full resolution, same background and overlay; ‹ › or arrow keys step through every slice.
+const LB = { view: 'axial', k: 0 };
+
+function openLightbox(name, k) {
+  const dlg = $('#lightbox');
+  if (!dlg) return;
+  LB.view = name;
+  drawLightbox(k);
+  if (!dlg.open) dlg.showModal();
+}
+
+function drawLightbox(k) {
+  const V = VIEWS[LB.view], n = [S.X, S.Y, S.Z][V.axis];
+  LB.k = clamp(k, 0, n - 1);
+  const [w, h] = V.wh(), [mw, mh] = V.mm(), c = $('#lb-canvas'), ctx = c.getContext('2d');
+  c.width = w; c.height = h; c.style.aspectRatio = `${mw} / ${mh}`;
+  const img = ctx.createImageData(w, h), d = img.data, sc = shadeCtx();
+  let p = 0;
+  for (let v = 0; v < h; v++) {
+    for (let u = 0; u < w; u++, p += 4) { const vox = V.toVox(u, v); vox[V.axis] = LB.k; shade(d, p, idx(vox[0], vox[1], vox[2]), sc); }
+  }
+  ctx.putImageData(img, 0, 0);
+  const area = sliceAreaCM2(V.axis, LB.k);
+  $('#lb-title').textContent = `${LB.view[0].toUpperCase() + LB.view.slice(1)} · slice ${LB.k + 1} / ${n}${area === null ? '' : ` · WT ${area.toFixed(1)} cm²`}`;
+  ['l', 'r', 't', 'b'].forEach((s, i) => { $(`#lb-${s}`).textContent = V.labels[i]; });
+}
+
+function initLightbox() {
+  const dlg = $('#lightbox');
+  if (!dlg) return;
+  dlg.querySelectorAll('.lb-nav').forEach((b) => b.addEventListener('click', () => drawLightbox(LB.k + Number(b.dataset.d))));
+  $('#lb-close').addEventListener('click', () => dlg.close());
+  $('#lb-goto').addEventListener('click', () => { dlg.close(); setSlice(VIEWS[LB.view], LB.k); });
+  dlg.addEventListener('click', (ev) => { if (ev.target === dlg) dlg.close(); });        // click on the backdrop
+  dlg.addEventListener('keydown', (ev) => {
+    const d = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1, PageUp: 10, PageDown: -10 }[ev.key];
+    if (d) { ev.preventDefault(); drawLightbox(LB.k + d); }
+  });
+}
+
 // Arrow keys / PageUp / PageDown / Home / End step through slices of the view under the pointer.
+// F enlarges the view under the pointer (or restores the grid); Esc restores the grid.
 document.addEventListener('keydown', (ev) => {
-  if (ev.target.closest && ev.target.closest('input, select, textarea, button')) return;
+  if (ev.target.closest && ev.target.closest('input, select, textarea')) return;
+  if ($('#lightbox')?.open || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if ((ev.key === 'f' || ev.key === 'F') && S.hoverPanel) {
+    ev.preventDefault(); setFocus(S.hoverPanel.classList.contains('big') ? null : S.hoverPanel); return;
+  }
+  if (ev.key === 'Escape' && !document.fullscreenElement && $('.views').classList.contains('focus')) { setFocus(null); return; }
   const V = S.hover && VIEWS[S.hover];
   if (!V || !V.ctx) return;
   const n = [S.X, S.Y, S.Z][V.axis], k = S.cross[V.axis];
@@ -533,6 +640,8 @@ async function main() {
     computeProfiles();
     buildSlicePanels();
     init3D();
+    buildPanelTools();
+    initLightbox();
     setCross(S.meta.lesion_centroid_canonical || [S.X >> 1, S.Y >> 1, S.Z >> 1]);
     buildGallery();
     status('Building surfaces…');
@@ -585,4 +694,5 @@ $('#run-ablation').addEventListener('click', async (e) => {
 window.addEventListener('resize', layoutSlices);
 $('#g-axis')?.addEventListener('change', buildGallery);
 $('#g-filter')?.addEventListener('change', buildGallery);
+$('#g-size')?.addEventListener('change', buildGallery);
 main();
