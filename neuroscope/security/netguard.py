@@ -5,6 +5,8 @@ It patches the Python-level socket API (socket.socket.connect/connect_ex/sendto/
 socket.create_connection, getaddrinfo, gethostbyname[_ex], gethostbyaddr, getnameinfo). urllib,
 http.client, requests, httpx and aiohttp all go through these. It cannot see C extensions that open
 sockets in native code without calling Python's socket module, nor other processes.
+The one exception is socket.socketpair(), an in-process pipe that Windows builds from two loopback sockets
+(asyncio's event loop needs it); its internal connect is allowed, nothing else is.
 """
 import contextlib
 import logging
@@ -31,8 +33,23 @@ def _caller() -> str:
     return "?"
 
 
+_local = threading.local()
+
+
+def _socketpair(*args, **kwargs):
+    """socket.socketpair() is an in-process pipe. On Windows CPython builds it by connecting two loopback
+    sockets inside this process (asyncio needs it for its event loop); allow only that internal connect."""
+    _local.in_socketpair = True
+    try:
+        return _originals[(socket, "socketpair")](*args, **kwargs)
+    finally:
+        _local.in_socketpair = False
+
+
 def _blocked(op: str):
     def handler(*args, **kwargs):
+        if op == "socket.connect" and getattr(_local, "in_socketpair", False):
+            return _originals[(socket.socket, "connect")](*args, **kwargs)
         target = ""
         for a in args:
             if isinstance(a, (tuple, str, bytes)) and not isinstance(a, socket.socket):
@@ -72,6 +89,8 @@ def enable():
             if hasattr(owner, attr):
                 _originals[(owner, attr)] = getattr(owner, attr)
                 setattr(owner, attr, _blocked(op))
+        _originals[(socket, "socketpair")] = socket.socketpair
+        socket.socketpair = _socketpair
     log.info("network guard enabled")
 
 

@@ -45,6 +45,21 @@ def test_guard_blocks_http_libraries_if_installed(mod):
     assert attempts, f"{mod} reached the network without the guard noticing"
 
 
+@pytest.mark.allow_attempts
+def test_guard_allows_only_in_process_socketpair():
+    with netguard.network_guard() as attempts:
+        a, b = socket.socketpair()                  # asyncio's self-pipe; on Windows built from loopback sockets
+        try:
+            a.sendall(b"ping")
+            assert b.recv(4) == b"ping"
+        finally:
+            a.close()
+            b.close()
+        with pytest.raises(netguard.NetworkBlockedError):
+            socket.create_connection(("127.0.0.1", 9))
+    assert [op for op, _, _ in attempts] == ["socket.create_connection"]
+
+
 def test_guard_restores_socket_api():
     with netguard.network_guard():
         pass
