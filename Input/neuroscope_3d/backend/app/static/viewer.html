@@ -102,6 +102,18 @@
     </aside>
   </main>
 
+  <section class="card wide" id="gallery-card">
+    <div class="ghead">
+      <h2>All slices</h2>
+      <label>View <select id="g-axis"><option value="axial">Axial</option><option value="coronal">Coronal</option><option value="sagittal">Sagittal</option></select></label>
+      <label>Show <select id="g-filter"><option value="all">every slice</option><option value="region">only slices with the predicted region</option></select></label>
+      <span id="g-count" class="muted small"></span>
+    </div>
+    <p class="muted small">Same background and overlay as the views above; the number under each image is the slice and the
+      area of the suspected tumour region predicted by the model in that slice. Click a slice to move the crosshair there:
+      all views and the 3D view follow.</p>
+    <div class="gallery" id="gallery" aria-label="All slices"></div>
+  </section>
   <section class="card wide">
     <h2>Estimated volumes</h2>
     <p id="formula" class="formula"></p>

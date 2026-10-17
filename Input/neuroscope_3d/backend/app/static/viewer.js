@@ -1,4 +1,6 @@
-// NeuroScope 3D viewer: 3D meshes in world mm + linked axial/coronal/sagittal slices with one crosshair.
+// Voxels viewer: 3D meshes in world mm + linked axial/coronal/sagittal slices with one crosshair.
+// Every slice is reachable: per-view slider (with a strip showing where the predicted region is), step and play
+// buttons, mouse wheel, arrow keys over a view, and an all-slices gallery that moves the crosshair on click.
 // Volumes arrive in canonical RAS voxel order (axis0 -> Right, axis1 -> Anterior, axis2 -> Superior), x fastest.
 import * as THREE from 'three';
 import { OrbitControls } from '/static/vendor/OrbitControls.js';
@@ -17,6 +19,7 @@ const REGION_CODES = { NCR: [1], ED: [2], ET: [4], TC: [1, 4], WT: [1, 2, 4] };
 const S = {
   meta: null, X: 0, Y: 0, Z: 0, sp: [1, 1, 1], A: null, Ainv: null, Oinv: null,
   vols: {}, cross: [0, 0, 0], bg: 'flair', overlay: 'pred', alpha: 0.5, codes: new Set([1, 2, 4]),
+  prof: null, hover: null, cine: null,
 };
 
 // ------------------------------------------------------------------ helpers
@@ -90,9 +93,78 @@ function buildSlicePanels() {
       ev.preventDefault();
       const c = [...S.cross]; c[V.axis] += ev.deltaY < 0 ? 1 : -1; setCross(c);
     }, { passive: false });
+    panel.addEventListener('pointerenter', () => { S.hover = name; });
+    panel.addEventListener('pointerleave', () => { if (S.hover === name) S.hover = null; });
+    buildSliceControls(name, V, panel);
   }
   layoutSlices();
 }
+
+// Slider + step buttons + play under each slice view; the strip behind the slider shows, per slice, how much of
+// the predicted region (WT) it contains, so the tumour's extent along that axis is visible at a glance.
+function buildSliceControls(name, V, panel) {
+  panel.querySelector('.sctl')?.remove();
+  const n = [S.X, S.Y, S.Z][V.axis], ctl = document.createElement('div');
+  ctl.className = 'sctl';
+  ctl.innerHTML = `<button type="button" class="step" data-d="-1" aria-label="Previous ${name} slice">‹</button>
+    <div class="track"><canvas class="prof" aria-hidden="true"></canvas>
+      <input type="range" min="1" max="${n}" step="1" value="${S.cross[V.axis] + 1}" aria-label="${name} slice number"></div>
+    <button type="button" class="step" data-d="1" aria-label="Next ${name} slice">›</button>
+    <button type="button" class="play" aria-label="Play through the ${name} slices" title="Play through the slices">▶</button>`;
+  panel.append(ctl);
+  V.range = ctl.querySelector('input');
+  V.play = ctl.querySelector('.play');
+  V.range.addEventListener('input', () => setSlice(V, Number(V.range.value) - 1));
+  ctl.querySelectorAll('.step').forEach((b) => b.addEventListener('click', () => setSlice(V, S.cross[V.axis] + Number(b.dataset.d))));
+  V.play.addEventListener('click', () => toggleCine(V));
+  drawProfile(V, ctl.querySelector('.prof'));
+}
+
+function drawProfile(V, c) {
+  const n = [S.X, S.Y, S.Z][V.axis], prof = S.prof && S.prof[V.axis];
+  c.width = n; c.height = 20;
+  const g = c.getContext('2d'); g.clearRect(0, 0, n, 20);
+  g.fillStyle = 'rgba(255,255,255,0.08)'; g.fillRect(0, 9, n, 2);
+  if (!prof) return;
+  let max = 0; for (const v of prof) max = Math.max(max, v);
+  if (!max) return;
+  g.fillStyle = 'rgba(232,176,48,0.85)';
+  for (let k = 0; k < n; k++) if (prof[k]) { const hgt = Math.max(2, Math.round((prof[k] / max) * 18)); g.fillRect(k, 10 - hgt / 2, 1, hgt); }
+}
+
+function setSlice(V, k) {
+  const c = [...S.cross]; c[V.axis] = k; setCross(c);
+}
+
+function toggleCine(V) {
+  const same = S.cine && S.cine.V === V;
+  stopCine();
+  if (same) return;
+  const n = [S.X, S.Y, S.Z][V.axis];
+  S.cine = { V, timer: setInterval(() => setSlice(V, (S.cross[V.axis] + 1) % n), 110) };
+  V.play.textContent = '❚❚'; V.play.setAttribute('aria-label', 'Pause'); V.play.title = 'Pause';
+}
+
+function stopCine() {
+  if (!S.cine) return;
+  clearInterval(S.cine.timer);
+  const P = S.cine.V.play; P.textContent = '▶'; P.setAttribute('aria-label', 'Play through the slices'); P.title = 'Play through the slices';
+  S.cine = null;
+}
+
+// Per-axis count of predicted (WT) voxels in every slice; area in cm² = count × in-plane voxel area ÷ 100.
+function computeProfiles() {
+  const p = S.vols.pred;
+  if (!p) { S.prof = null; return; }
+  const prof = [new Uint32Array(S.X), new Uint32Array(S.Y), new Uint32Array(S.Z)];
+  let i = 0;
+  for (let z = 0; z < S.Z; z++) for (let y = 0; y < S.Y; y++) for (let x = 0; x < S.X; x++, i++) {
+    if (p[i]) { prof[0][x]++; prof[1][y]++; prof[2][z]++; }
+  }
+  S.prof = prof;
+}
+const inPlaneMM2 = (axis) => (axis === 2 ? S.sp[0] * S.sp[1] : axis === 1 ? S.sp[0] * S.sp[2] : S.sp[1] * S.sp[2]);
+const sliceAreaCM2 = (axis, k) => (S.prof ? (S.prof[axis][k] * inPlaneMM2(axis)) / 100 : null);
 
 function layoutSlices() {
   for (const V of Object.values(VIEWS)) {
@@ -113,29 +185,43 @@ function overlayLUTs() {
   return { inCodes, region };
 }
 
-function renderSlice(V) {
-  const [w, h] = V.wh(), d = V.imageData.data, bg = S.vols[S.bg];
-  const pred = S.vols.pred, expert = S.vols.expert, a = S.alpha, mode = S.overlay;
+// Display settings for shading: background volume, overlay mode, opacity and colour look-ups.
+function shadeCtx() {
   const { inCodes, region } = overlayLUTs();
+  return { bg: S.vols[S.bg], pred: S.vols.pred, expert: S.vols.expert, uncert: S.vols.uncert, a: S.alpha, mode: S.overlay,
+    inCodes, region };
+}
+
+// Writes the RGBA of voxel i (background grey blended with the overlay colour) into d at offset p.
+function shade(d, p, i, k) {
+  const g = k.bg ? k.bg[i] : 0, mode = k.mode;
+  let c = null;
+  if (mode === 'uncert') c = k.uncert && k.uncert[i] ? UNCERT_RGB[k.uncert[i]] : null;
+  else if (mode === 'pred' && k.pred && k.inCodes[k.pred[i]]) c = LABEL_RGB[k.pred[i]];
+  else if (mode === 'expert' && k.expert && k.inCodes[k.expert[i]]) c = LABEL_RGB[k.expert[i]];
+  else if (mode.startsWith('agree-') && k.pred && k.expert) {
+    const pm = k.region[k.pred[i]], em = k.region[k.expert[i]];
+    c = pm && em ? AGREE_RGB.both : pm ? AGREE_RGB.fp : em ? AGREE_RGB.fn : null;
+  }
+  if (c) { d[p] = g + (c[0] - g) * k.a; d[p + 1] = g + (c[1] - g) * k.a; d[p + 2] = g + (c[2] - g) * k.a; }
+  else { d[p] = d[p + 1] = d[p + 2] = g; }
+  d[p + 3] = 255;
+}
+
+function renderSlice(V) {
+  const [w, h] = V.wh(), d = V.imageData.data, k = shadeCtx();
   let p = 0;
   for (let v = 0; v < h; v++) {
     for (let u = 0; u < w; u++, p += 4) {
-      const [x, y, z] = V.toVox(u, v), i = idx(x, y, z), g = bg ? bg[i] : 0;
-      let c = null;
-      if (mode === 'uncert') { const u = S.vols.uncert; c = u && u[i] ? UNCERT_RGB[u[i]] : null; }
-      else if (mode === 'pred' && pred && inCodes[pred[i]]) c = LABEL_RGB[pred[i]];
-      else if (mode === 'expert' && expert && inCodes[expert[i]]) c = LABEL_RGB[expert[i]];
-      else if (mode.startsWith('agree-') && pred && expert) {
-        const pm = region[pred[i]], em = region[expert[i]];
-        c = pm && em ? AGREE_RGB.both : pm ? AGREE_RGB.fp : em ? AGREE_RGB.fn : null;
-      }
-      if (c) { d[p] = g + (c[0] - g) * a; d[p + 1] = g + (c[1] - g) * a; d[p + 2] = g + (c[2] - g) * a; }
-      else { d[p] = d[p + 1] = d[p + 2] = g; }
-      d[p + 3] = 255;
+      const [x, y, z] = V.toVox(u, v);
+      shade(d, p, idx(x, y, z), k);
     }
   }
   V.ctx.putImageData(V.imageData, 0, 0);
-  V.panel.querySelector('.idx').textContent = `slice ${S.cross[V.axis] + 1} / ${[S.X, S.Y, S.Z][V.axis]}`;
+  const s = S.cross[V.axis], area = sliceAreaCM2(V.axis, s);
+  V.panel.querySelector('.idx').textContent = `slice ${s + 1} / ${[S.X, S.Y, S.Z][V.axis]}` +
+    (area === null ? '' : ` · WT ${area.toFixed(1)} cm²`);
+  if (V.range) V.range.value = s + 1;
   drawCross(V);
 }
 
@@ -155,6 +241,7 @@ function setCross(c) {
   S.cross = [clamp(Math.round(c[0]), 0, S.X - 1), clamp(Math.round(c[1]), 0, S.Y - 1), clamp(Math.round(c[2]), 0, S.Z - 1)];
   renderAllSlices();
   update3DCross();
+  markGalleryCurrent();
   const w = toWorld(S.cross), o = mv(S.Oinv, [...w, 1]).map((x) => Math.round(x));
   const i = idx(...S.cross);
   $('#c-vox').textContent = `i ${o[0]}, j ${o[1]}, k ${o[2]}`;
@@ -163,6 +250,80 @@ function setCross(c) {
   if (S.vols.expert) $('#c-expert').textContent = LABEL_NAME[S.vols.expert[i]] ?? S.vols.expert[i];
   $('#c-int').textContent = S.vols[S.bg] ? `${S.bg.toUpperCase()} display value ${S.vols[S.bg][i]} / 255` : '—';
 }
+
+// ------------------------------------------------------------------ all-slices gallery
+// One small image per slice along the chosen axis, drawn only when scrolled into view. Click one to move the
+// crosshair to that slice; the three views and the 3D view follow.
+const G = { view: 'axial', thumbs: [], io: null };
+
+function buildGallery() {
+  const box = $('#gallery');
+  if (!box) return;
+  const name = $('#g-axis').value, V = VIEWS[name], n = [S.X, S.Y, S.Z][V.axis];
+  const onlyRegion = $('#g-filter').value === 'region';
+  const [w, h] = V.wh(), [mw, mh] = V.mm(), step = Math.max(1, Math.ceil(Math.max(w, h) / 112));
+  if (G.io) G.io.disconnect();
+  G.io = new IntersectionObserver((ents) => ents.forEach((e) => e.isIntersecting && drawThumb(e.target)),
+    { root: box, rootMargin: '160px' });
+  box.innerHTML = '';
+  G.view = name; G.thumbs = []; G.step = step;
+  for (let k = 0; k < n; k++) {
+    const has = S.prof ? S.prof[V.axis][k] > 0 : false;
+    if (onlyRegion && !has) continue;
+    const area = sliceAreaCM2(V.axis, k);
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = `thumb${has ? ' has' : ''}`; b.dataset.k = k;
+    b.setAttribute('aria-label', `${name} slice ${k + 1}${area ? `, predicted region ${area.toFixed(1)} cm²` : ''}`);
+    b.innerHTML = `<canvas width="${Math.floor(w / step)}" height="${Math.floor(h / step)}" style="aspect-ratio:${mw} / ${mh}"></canvas>
+      <span>${k + 1}${area ? ` · ${area.toFixed(1)} cm²` : ''}</span>`;
+    b.addEventListener('click', () => setSlice(V, k));
+    box.append(b); G.thumbs.push(b); G.io.observe(b);
+  }
+  $('#g-count').textContent = G.thumbs.length
+    ? `${G.thumbs.length} of ${n} ${name} slices` : `No ${name} slice contains the predicted region.`;
+  markGalleryCurrent();
+}
+
+function drawThumb(b) {
+  if (b.dataset.drawn === '1') return;
+  const V = VIEWS[G.view], sl = Number(b.dataset.k), c = b.querySelector('canvas'), st = G.step;
+  const tw = c.width, th = c.height, ctx = c.getContext('2d'), img = ctx.createImageData(tw, th), d = img.data, k = shadeCtx();
+  let p = 0;
+  for (let v = 0; v < th; v++) {
+    for (let u = 0; u < tw; u++, p += 4) {
+      const vox = V.toVox(u * st, v * st); vox[V.axis] = sl;
+      shade(d, p, idx(vox[0], vox[1], vox[2]), k);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  b.dataset.drawn = '1';
+}
+
+// Redraw thumbnails after the background, overlay, opacity or label choice changes.
+function refreshGallery() {
+  if (!G.io) return;
+  G.io.disconnect();
+  for (const b of G.thumbs) { b.dataset.drawn = ''; G.io.observe(b); }
+}
+
+function markGalleryCurrent() {
+  if (!G.thumbs.length) return;
+  const k = String(S.cross[VIEWS[G.view].axis]);
+  for (const b of G.thumbs) b.classList.toggle('current', b.dataset.k === k);
+}
+
+// Arrow keys / PageUp / PageDown / Home / End step through slices of the view under the pointer.
+document.addEventListener('keydown', (ev) => {
+  if (ev.target.closest && ev.target.closest('input, select, textarea, button')) return;
+  const V = S.hover && VIEWS[S.hover];
+  if (!V || !V.ctx) return;
+  const n = [S.X, S.Y, S.Z][V.axis], k = S.cross[V.axis];
+  const step = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1, PageUp: 10, PageDown: -10 }[ev.key];
+  const to = step ? k + step : ev.key === 'Home' ? 0 : ev.key === 'End' ? n - 1 : null;
+  if (to === null) return;
+  ev.preventDefault();
+  setSlice(V, to);
+});
 
 // ------------------------------------------------------------------ 3D
 const T = { meshes: {} };
@@ -369,18 +530,21 @@ async function main() {
     if (!S.meta.has_prediction) status('No prediction yet — run segmentation from the upload page first.', true);
     status('Loading volumes…');
     await Promise.all([getVol('flair'), S.meta.has_prediction ? getVol('pred') : null, S.meta.has_expert ? getVol('expert') : null]);
+    computeProfiles();
     buildSlicePanels();
     init3D();
     setCross(S.meta.lesion_centroid_canonical || [S.X >> 1, S.Y >> 1, S.Z >> 1]);
+    buildGallery();
     status('Building surfaces…');
     buildMeshes(await getJSON(`${API}/meshes`));
     update3DCross();
-    status('Ready. Click or drag in any slice, scroll to change slice, or click a 3D surface.');
+    status('Ready. Click or drag in a slice; change slice with the slider, ‹ ›, ▶, the mouse wheel or ↑/↓ over a view; '
+      + 'or click a 3D surface. Every slice is also listed under “All slices”.');
   } catch (e) { status(`Error: ${e.message}`, true); console.error(e); }
 }
 
 $('#bg-seq').addEventListener('change', async (e) => {
-  try { status('Loading sequence…'); await getVol(e.target.value); S.bg = e.target.value; setCross(S.cross); status('Ready.'); }
+  try { status('Loading sequence…'); await getVol(e.target.value); S.bg = e.target.value; setCross(S.cross); refreshGallery(); status('Ready.'); }
   catch (err) { status(err.message, true); }
 });
 $('#overlay').addEventListener('change', async (e) => {
@@ -389,11 +553,11 @@ $('#overlay').addEventListener('change', async (e) => {
   }
   S.overlay = e.target.value; $('#agree-legend').hidden = !S.overlay.startsWith('agree-');
   $('#uncert-legend').hidden = S.overlay !== 'uncert';
-  $('#label-toggles').style.opacity = S.overlay.startsWith('agree-') ? 0.4 : 1; renderAllSlices();
+  $('#label-toggles').style.opacity = S.overlay.startsWith('agree-') ? 0.4 : 1; renderAllSlices(); refreshGallery();
 });
-$('#ov-alpha').addEventListener('input', (e) => { S.alpha = Number(e.target.value); renderAllSlices(); });
+$('#ov-alpha').addEventListener('input', (e) => { S.alpha = Number(e.target.value); renderAllSlices(); refreshGallery(); });
 document.querySelectorAll('#label-toggles input').forEach((cb) => cb.addEventListener('change', () => {
-  const c = Number(cb.dataset.code); cb.checked ? S.codes.add(c) : S.codes.delete(c); renderAllSlices();
+  const c = Number(cb.dataset.code); cb.checked ? S.codes.add(c) : S.codes.delete(c); renderAllSlices(); refreshGallery();
 }));
 $('#goto-lesion').addEventListener('click', () => S.meta?.lesion_centroid_canonical && setCross(S.meta.lesion_centroid_canonical));
 $('#reset-cam').addEventListener('click', () => { T.framed = false; frameCamera(); });
@@ -408,6 +572,7 @@ $('#expert-file').addEventListener('change', async (e) => {
     await getVol('expert');
     buildMeshes(await getJSON(`${API}/meshes`));
     setCross(S.cross);
+    refreshGallery();
     msg.textContent = 'Expert mask attached. Choose "Expert mask" or "Agreement" under Slices; expert surfaces are in 3D layers.';
   } catch (err) { msg.textContent = `Rejected: ${err.message}`; }
   e.target.value = '';
@@ -418,4 +583,6 @@ $('#run-ablation').addEventListener('click', async (e) => {
   catch (err) { $('#ablation').textContent = err.message; e.target.disabled = false; e.target.textContent = 'Run modality ablation'; }
 });
 window.addEventListener('resize', layoutSlices);
+$('#g-axis')?.addEventListener('change', buildGallery);
+$('#g-filter')?.addEventListener('change', buildGallery);
 main();
