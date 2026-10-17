@@ -4,6 +4,7 @@ Provides NIfTI upload & validation API, segmentation routing, health checks,
 and serves the React web interface.
 """
 
+import mimetypes
 import os
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from app.core.exceptions import NIfTIValidationError
 from app.services.study_store import study_store
 
 from brainseg.constants import DISCLAIMER
+
+mimetypes.add_type("image/webp", ".webp")  # not in the Windows registry everywhere; used by the loader images
 
 app = FastAPI(
     title="Voxels — research prototype",
