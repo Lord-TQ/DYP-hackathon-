@@ -93,11 +93,28 @@
         <div id="ablation" class="small"></div>
       </div>
 
-      <div class="card">
-        <h2>Expert mask (optional)</h2>
-        <p class="muted small">NIfTI on the same grid, BraTS codes 0/1/2/4. Shown next to the model's prediction.</p>
+      <div class="card" id="expert-input-card">
+        <h2>Expert comparison (optional)</h2>
+        <p class="small"><b>Upload expert mask</b></p>
+        <p class="muted small">Expert-drawn NIfTI (.nii / .nii.gz) on the same grid, orientation and spacing as the MRI;
+          BraTS codes 0/1/2/4. Gives Dice, sensitivity, precision, IoU and HD95 for WT, TC and ET.</p>
         <input type="file" id="expert-file" accept=".nii,.gz">
-        <div id="expert-msg" class="small"></div>
+        <button class="small" id="expert-remove" type="button" hidden>Remove expert mask</button>
+        <div id="expert-msg" class="small" role="status"></div>
+
+        <p class="small" style="margin-top:16px"><b>Enter doctor's readings</b></p>
+        <p class="muted small">Tumour volumes in mL from a doctor's reading. Compared by volume difference only;
+          overlap scores need a mask.</p>
+        <form id="readings-form" class="readings" novalidate>
+          <label>WT <input type="number" name="WT" min="0" max="2000" step="0.01" inputmode="decimal" placeholder="mL"></label>
+          <label>TC <input type="number" name="TC" min="0" max="2000" step="0.01" inputmode="decimal" placeholder="mL"></label>
+          <label>ET <input type="number" name="ET" min="0" max="2000" step="0.01" inputmode="decimal" placeholder="mL"></label>
+          <div class="readings-actions">
+            <button class="small" type="submit">Compare volumes</button>
+            <button class="small" type="button" id="readings-clear" hidden>Remove readings</button>
+          </div>
+        </form>
+        <div id="readings-msg" class="small" role="status"></div>
       </div>
     </aside>
   </main>
@@ -113,6 +130,12 @@
     <p class="muted small">Same background and overlay as the views above; the number under each image is the slice and the
       area of the suspected tumour region predicted by the model in that slice. Click any slice to open it large; the views and the 3D crosshair follow the slice you are on. Inside, zoom with the wheel or + / − and step with ← →.</p>
     <div class="gallery" id="gallery" aria-label="All slices"></div>
+  </section>
+  <section class="card wide" id="expert-card">
+    <h2>Expert comparison <span class="scope">this case only</span></h2>
+    <p class="muted small">Compares the model with a reference you supply for this study. This is separate from the
+      20-case benchmark on the home page, which measures the model on other, labelled cases.</p>
+    <div id="expert-results"></div>
   </section>
   <section class="card wide">
     <h2>Estimated volumes</h2>

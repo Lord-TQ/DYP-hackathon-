@@ -212,6 +212,62 @@ def _fmt(v, nd=3):
     return "—" if v is None else (f"{v:.{nd}f}" if isinstance(v, float) else str(v))
 
 
+# ---------------------------------------------------------------- expert comparison (this case only)
+
+EXPERT_SCOPE = ("Compares the model with the reference supplied for this case only. It is not the benchmark: "
+                "dataset-level scores are reported separately, on other cases.")
+MASK_METRIC_NOTE = ("Dice = 2 x overlap / (model + expert voxels); sensitivity = overlap / expert voxels; "
+                    "precision = overlap / model voxels; IoU = overlap / union; HD95 = 95th-percentile symmetric "
+                    "surface distance in mm. Regions use BraTS codes WT = 1+2+4, TC = 1+4, ET = 4. "
+                    "A dash means undefined (an empty region).")
+READING_NOTE = ("Entered volumes are compared by volume only: difference = model - entered; % = difference / entered. "
+                "Dice, sensitivity and the other overlap scores need a voxel-wise expert mask and are not computed "
+                "from volumes. Equal volumes do not mean the same voxels.")
+
+
+def _pct(v):
+    return "—" if v is None else f"{v:+.1f}%"
+
+
+def expert_comparison_parts(m):
+    """(mask rows, mask notes, reading rows, reading meta) for the report; rows include a header. None = absent."""
+    mask_rows = None
+    if m.get("agreement"):
+        mask_rows = [["Region", "Dice", "Sensitivity", "Precision", "IoU", "HD95 (mm)", "Model voxels", "Expert voxels"]]
+        for r in ("WT", "TC", "ET"):
+            v = m["agreement"][r]
+            mask_rows.append([r, _fmt(v["dice"]), _fmt(v["sensitivity"]), _fmt(v.get("precision")), _fmt(v.get("iou")),
+                              _fmt(v["hd95_mm"], 1), f"{v['pred_voxels']:,}", f"{v['ref_voxels']:,}"])
+    read_rows = None
+    rc = m.get("readings_comparison")
+    if rc:
+        read_rows = [["Region", "Model (mL)", "Entered (mL)", "Model - entered (mL)", "Absolute (mL)", "Difference (%)"]]
+        for r, v in rc.items():
+            read_rows.append([r, f"{v['model_mL']:.2f}", f"{v['doctor_mL']:.2f}", f"{v['difference_mL']:+.2f}",
+                              f"{v['abs_difference_mL']:.2f}", _pct(v["percent_difference"])])
+    return mask_rows, m.get("expert_notes") or [], read_rows, m.get("doctor_readings")
+
+
+def _expert_html(m) -> str:
+    mask_rows, notes, read_rows, readings = expert_comparison_parts(m)
+    if not mask_rows and not read_rows:
+        return ""
+    e = html.escape
+
+    def tab(rows):
+        return ("<table><tr>" + "".join(f"<th>{e(h)}</th>" for h in rows[0]) + "</tr>"
+                + "".join("<tr>" + "".join(f"<td>{e(c)}</td>" for c in r) + "</tr>" for r in rows[1:]) + "</table>")
+    out = f"<h2>Expert comparison (this case only)</h2><p class=muted>{e(EXPERT_SCOPE)}</p>"
+    if mask_rows:
+        fn = (m.get("expert_mask") or {}).get("filename")
+        out += f"<h3>Agreement with the expert mask{(' · ' + e(fn)) if fn else ''}</h3>" + tab(mask_rows)
+        out += "".join(f"<p class=warn>{e(n)}</p>" for n in notes) + f"<p class=muted>{e(MASK_METRIC_NOTE)}</p>"
+    if read_rows:
+        out += (f"<h3>Doctor's volume readings · entered {e(readings['entered_utc'])} UTC</h3>" + tab(read_rows)
+                + f"<p class=muted>{e(READING_NOTE)}</p>")
+    return out
+
+
 # ---------------------------------------------------------------- HTML
 
 def render_html(study: ValidatedStudy) -> str:
@@ -237,16 +293,7 @@ def render_html(study: ValidatedStudy) -> str:
             )
         return "".join(out)
 
-    agreement = ""
-    if m["agreement"]:
-        rows = "".join(
-            f"<tr><td>{r}</td><td>{_fmt(v['dice'])}</td><td>{_fmt(v['sensitivity'])}</td><td>{_fmt(v['hd95_mm'], 1)}</td></tr>"
-            for r, v in m["agreement"].items()
-        )
-        agreement = (
-            "<h2>Agreement with the supplied expert mask (this case only)</h2>"
-            "<table><tr><th>Region</th><th>Dice</th><th>Sensitivity</th><th>HD95 (mm)</th></tr>" + rows + "</table>"
-        )
+    agreement = _expert_html(m)
 
     ev = d["evaluation"]
     ev_head, ev_paras, ev_rows = evaluation_parts(ev, d["split"])
@@ -487,10 +534,28 @@ def render_pdf(study: ValidatedStudy) -> bytes:
             f"gives WT between {w['volume_mL_min']:.2f} and {w['volume_mL_max']:.2f} mL; "
             f"{u['wt_uncertain_fraction'] * 100:.1f}% of WT voxels change between passes.", body)]
 
+    mask_rows, notes, read_rows, readings = expert_comparison_parts(m)
+    if mask_rows or read_rows:
+        block = [Paragraph("Expert comparison &nbsp;·&nbsp; this case only", h2),
+                 Paragraph(e(EXPERT_SCOPE), small), Spacer(1, 4)]
+        if mask_rows:
+            fn = (m.get("expert_mask") or {}).get("filename")
+            block += [Paragraph(f"EXPERT MASK{(' · ' + e(fn)) if fn else ''}", tag), Spacer(1, 2),
+                      table(mask_rows, [16 * mm, 18 * mm, 22 * mm, 20 * mm, 16 * mm, 22 * mm, 33 * mm, 33 * mm])]
+            block += [Paragraph(e(n), style("en", fontSize=7.5, leading=10, textColor=colors.HexColor("#5a3d06")))
+                      for n in notes]
+            block += [Paragraph(e(MASK_METRIC_NOTE), small), Spacer(1, 6)]
+        if read_rows:
+            block += [Paragraph(f"DOCTOR'S VOLUME READINGS · ENTERED {e(readings['entered_utc'][:16].replace('T', ' '))} UTC",
+                                tag), Spacer(1, 2),
+                      table(read_rows, [16 * mm, 26 * mm, 26 * mm, 38 * mm, 28 * mm, 30 * mm]),
+                      Paragraph(e(READING_NOTE), small)]
+        story += [Spacer(1, 4), KeepTogether(block)]
+
     # ---- page 2: other cases, provenance, limits
     story.append(PageBreak())
     ev, split = d["evaluation"], d["split"]
-    story.append(Paragraph("2 &nbsp; How the model performs on other cases", h2))
+    story.append(Paragraph("2 &nbsp; Benchmark: how the model performs on other cases", h2))
     if ev:
         s = ev["summary"]
         n = ev["n_cases"]
@@ -498,7 +563,7 @@ def render_pdf(study: ValidatedStudy) -> bytes:
         trained_txt = ("none (pretrained model used as-is)" if trained == []
                        else ", ".join(trained) if trained else "not provided")
         story.append(Paragraph(
-            f"Dataset-level, not about this case. {n} labelled cases from {e(ev['dataset'])}, split by case ID "
+            f"Dataset-level benchmark, not about this case and separate from any expert comparison above. {n} labelled cases from {e(ev['dataset'])}, split by case ID "
             f"(one case ID is taken as one patient; the release has no patient identifiers). Cases we trained or "
             f"tuned on: {e(trained_txt)}.", body))
         rows = [["Region", "Dice mean ± SD", "Sensitivity mean ± SD", "Cases (n)"]]

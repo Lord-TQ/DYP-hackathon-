@@ -8,6 +8,7 @@ a canonical index back to the uploaded voxel index: ijk_orig = inv(original_affi
 """
 
 import base64
+import datetime
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -88,8 +89,24 @@ def validate_expert_mask(path: Path, ref: nib.Nifti1Image) -> np.ndarray:
             f"Expert mask shape {data.shape} does not match the MRI sequences {ref.shape[:3]}.",
             "EXPERT_MASK_SHAPE_MISMATCH",
         )
+    # checked one property at a time so the message says what differs; the affine check covers the rest
+    o_mask, o_ref = "".join(nib.aff2axcodes(img.affine)), "".join(nib.aff2axcodes(ref.affine))
+    if o_mask != o_ref:
+        raise NIfTIValidationError(
+            f"Expert mask orientation {o_mask} does not match the MRI sequences ({o_ref}).",
+            "EXPERT_MASK_ORIENTATION_MISMATCH", details={"expert": o_mask, "mri": o_ref})
+    z_mask = [round(float(z), 4) for z in img.header.get_zooms()[:3]]
+    z_ref = [round(float(z), 4) for z in ref.header.get_zooms()[:3]]
+    if not np.allclose(z_mask, z_ref, rtol=1e-3, atol=1e-3):
+        raise NIfTIValidationError(
+            f"Expert mask voxel spacing {z_mask} mm does not match the MRI sequences ({z_ref} mm).",
+            "EXPERT_MASK_SPACING_MISMATCH", details={"expert": z_mask, "mri": z_ref})
     if not np.allclose(img.affine, ref.affine, rtol=1e-3, atol=1e-3):
-        raise NIfTIValidationError("Expert mask affine does not match the MRI sequences.", "EXPERT_MASK_AFFINE_MISMATCH")
+        shift = float(np.linalg.norm(img.affine[:3, 3] - ref.affine[:3, 3]))
+        raise NIfTIValidationError(
+            "Expert mask is not aligned with the MRI sequences (same grid size, orientation and spacing, but its "
+            f"position or axes differ; origin offset {shift:.2f} mm). Resample it onto the MRI grid first.",
+            "EXPERT_MASK_AFFINE_MISMATCH", details={"origin_offset_mm": round(shift, 3)})
     if not np.all(np.isfinite(data)) or not np.allclose(data, np.round(data)):
         raise NIfTIValidationError("Expert mask must contain integer label codes.", "INVALID_EXPERT_MASK")
     values = set(np.unique(data).astype(int).tolist())
@@ -109,6 +126,13 @@ def validate_expert_mask(path: Path, ref: nib.Nifti1Image) -> np.ndarray:
 def store_expert_mask(study: ValidatedStudy, upload_path: Path):
     ref = _ref_image(study)
     data = validate_expert_mask(upload_path, ref)
+    pred = _labels(study, "pred")
+    if pred is not None and pred.any() and np.array_equal(pred, data):
+        # the model's own output is not ground truth; comparing it with itself would report a perfect score
+        raise NIfTIValidationError(
+            "This mask is voxel-for-voxel identical to the model's prediction for this study, so it cannot serve as "
+            "an independent expert reference. Upload a mask drawn by an expert.",
+            "EXPERT_MASK_IS_PREDICTION")
     header = ref.header.copy()
     header.set_data_dtype(np.uint8)
     header.set_slope_inter(1, 0)
@@ -118,6 +142,90 @@ def store_expert_mask(study: ValidatedStudy, upload_path: Path):
             f.unlink()
     study.metadata["expert_mask"] = {"filename": upload_path.name.split("_", 1)[-1]}
     study_store.persist(study)
+
+
+def remove_expert_mask(study: ValidatedStudy):
+    (Path(study.study_dir) / EXPERT_FILENAME).unlink(missing_ok=True)
+    for f in _cache(study).glob("*"):
+        if f.name.startswith(("expert", "meshes")):
+            f.unlink()
+    study.metadata.pop("expert_mask", None)
+    study_store.persist(study)
+
+
+# ---------------------------------------------------------------- doctor's volume readings
+
+READING_REGIONS = ("WT", "TC", "ET")
+READING_MAX_ML = 2000.0                                 # larger than any adult brain; catches unit mistakes (mm³)
+
+
+def store_readings(study: ValidatedStudy, volumes_ml: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate and store volumes (mL) entered from a doctor's reading. WT, TC and/or ET."""
+    vals = {}
+    for r in READING_REGIONS:
+        v = volumes_ml.get(r)
+        if v is None:
+            continue
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not np.isfinite(v):
+            raise NIfTIValidationError(f"{r} must be a number of millilitres.", "INVALID_READING")
+        if v < 0 or v > READING_MAX_ML:
+            raise NIfTIValidationError(
+                f"{r} = {v:g} mL is outside 0 to {READING_MAX_ML:.0f} mL. Enter millilitres (1 mL = 1,000 mm³).",
+                "INVALID_READING")
+        vals[r] = float(v)
+    if not vals:
+        raise NIfTIValidationError("Enter at least one of WT, TC or ET in mL.", "INVALID_READING")
+    # the regions are nested (ET inside TC inside WT), so the volumes must be too
+    for inner, outer in (("TC", "WT"), ("ET", "TC"), ("ET", "WT")):
+        if inner in vals and outer in vals and vals[inner] > vals[outer] + 1e-9:
+            raise NIfTIValidationError(
+                f"{inner} ({vals[inner]:g} mL) cannot be larger than {outer} ({vals[outer]:g} mL): ET is part of TC "
+                "and TC is part of WT.", "INCONSISTENT_READING")
+    study.metadata["doctor_readings"] = {
+        "volumes_mL": vals,
+        "entered_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+    }
+    study_store.persist(study)
+    return study.metadata["doctor_readings"]
+
+
+def clear_readings(study: ValidatedStudy):
+    study.metadata.pop("doctor_readings", None)
+    study_store.persist(study)
+
+
+def readings_comparison(model_volumes: Optional[Dict[str, Any]], readings: Optional[Dict[str, Any]]):
+    """Model volume minus the entered volume, in mL and as a percentage of the entered volume. Volumes alone
+    cannot give Dice, sensitivity or any overlap score: those need a voxel-wise reference."""
+    if not model_volumes or not readings:
+        return None
+    rows = {}
+    for r in READING_REGIONS:
+        if r not in readings["volumes_mL"]:
+            continue
+        doc, model = float(readings["volumes_mL"][r]), float(model_volumes[r]["mL"])
+        diff = model - doc
+        rows[r] = {"model_mL": model, "doctor_mL": doc, "difference_mL": diff, "abs_difference_mL": abs(diff),
+                   "percent_difference": None if doc == 0 else 100.0 * diff / doc}
+    return rows
+
+
+def expert_notes(pred: Optional[np.ndarray], expert: Optional[np.ndarray]):
+    """Plain-language notes on empty regions, so undefined or trivial scores are not misread."""
+    if expert is None:
+        return []
+    notes = []
+    if not expert.any():
+        notes.append("The expert mask is empty (no tumour labelled). Sensitivity and HD95 are undefined where the "
+                     "expert marked nothing; Dice and IoU are 1.0 only where the model also predicted nothing.")
+    r_e = region_masks(expert)
+    r_p = region_masks(pred) if pred is not None else None
+    for name in READING_REGIONS:
+        if expert.any() and not r_e[name].any():
+            notes.append(f"The expert marked no {name} voxels, so sensitivity for {name} is undefined.")
+        if r_p is not None and not r_p[name].any():
+            notes.append(f"The model predicted no {name} voxels, so precision for {name} is undefined.")
+    return notes
 
 
 # ---------------------------------------------------------------- volumes for slices
@@ -231,6 +339,11 @@ def meta(study: ValidatedStudy) -> Dict[str, Any]:
         "volumes": {"model": region_volumes(pred, spacing) if pred is not None else None,
                     "expert": region_volumes(expert, spacing) if expert is not None else None},
         "agreement": _agreement(pred, expert, spacing) if pred is not None and expert is not None else None,
+        "expert_mask": study.metadata.get("expert_mask"),
+        "expert_notes": expert_notes(pred, expert),
+        "doctor_readings": study.metadata.get("doctor_readings"),
+        "readings_comparison": readings_comparison(region_volumes(pred, spacing) if pred is not None else None,
+                                                   study.metadata.get("doctor_readings")),
         "suitability": study.metadata.get("suitability", {}),
         "backup": study.metadata.get("backup"),
         "source_4d": study.metadata.get("source_4d"),

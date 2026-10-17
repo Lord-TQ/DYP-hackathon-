@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
+from typing import Optional
+
 from fastapi import APIRouter, File, UploadFile
+from pydantic import BaseModel
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from app.core.exceptions import NIfTIValidationError
@@ -60,6 +63,41 @@ def upload_expert_mask(study_id: str, file: UploadFile = File(...)):
         finally:
             dest.unlink(missing_ok=True)
         return {"status": "success", "study_id": study_id, "message": "Expert mask attached."}
+    except NIfTIValidationError as e:
+        return _error(e)
+
+
+@router.delete("/api/viewer/{study_id}/expert", summary="Remove the expert mask from this study")
+def delete_expert_mask(study_id: str):
+    try:
+        viewer_data.remove_expert_mask(viewer_data.get_study(study_id))
+        return {"status": "success", "study_id": study_id, "message": "Expert mask removed."}
+    except NIfTIValidationError as e:
+        return _error(e)
+
+
+class Readings(BaseModel):
+    WT: Optional[float] = None
+    TC: Optional[float] = None
+    ET: Optional[float] = None
+
+
+@router.post("/api/viewer/{study_id}/readings",
+             summary="Doctor's volume readings in mL (WT/TC/ET); compared by volume difference only, never Dice")
+def save_readings(study_id: str, body: Readings):
+    try:
+        study = viewer_data.get_study(study_id)
+        return {"status": "success", "study_id": study_id,
+                "readings": viewer_data.store_readings(study, body.model_dump())}
+    except NIfTIValidationError as e:
+        return _error(e)
+
+
+@router.delete("/api/viewer/{study_id}/readings", summary="Remove the doctor's volume readings from this study")
+def delete_readings(study_id: str):
+    try:
+        viewer_data.clear_readings(viewer_data.get_study(study_id))
+        return {"status": "success", "study_id": study_id}
     except NIfTIValidationError as e:
         return _error(e)
 

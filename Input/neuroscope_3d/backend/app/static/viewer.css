@@ -61,6 +61,20 @@ table.grid th, table.grid td { border-bottom: 1px solid var(--line); padding: 7p
 table.grid th:first-child, table.grid td:first-child { text-align: left; }
 table.grid th { color: var(--muted); font: 500 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
 table.grid td b { color: var(--fg); font-weight: 500; }
+/* expert comparison */
+.readings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+.readings label { display: flex; flex-direction: column; gap: 3px; font: 500 11px var(--mono); color: var(--muted); }
+.readings input { width: 100%; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); padding: 5px 6px;
+  font: 400 13px var(--mono); }
+.readings input:focus { outline: 1px solid var(--et); }
+.readings-actions { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+.msg-ok { color: #b7d7a8; } .msg-err { color: #ffb4a3; }
+.card.wide h2 .scope { font: 500 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--et);
+  vertical-align: middle; margin-left: 10px; }
+.card.wide h3 { font: 500 10.5px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 18px 0 8px; }
+.xnote { background: var(--warn-bg); color: var(--warn-fg); padding: 7px 10px; margin: 6px 0 0; font-size: 12.5px; }
+.xdef { color: var(--muted); font: 400 11.5px/1.6 var(--mono); margin: 8px 0 0; }
+.xempty { color: var(--muted); font-size: 13.5px; }
 .foot { color: var(--muted); font: 400 11.5px var(--mono); text-align: center; padding: 16px var(--gutter) 28px; border-top: 1px solid var(--line); }
 /* slice navigation: slider (with predicted-region profile), step and play buttons under each view */
 .sctl { position: relative; z-index: 3; display: grid; grid-template-columns: 26px minmax(0, 1fr) 26px 30px; gap: 6px;

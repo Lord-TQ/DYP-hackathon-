@@ -601,11 +601,57 @@ function renderTables() {
         `<td><b>${b.mL.toFixed(2)}</b></td><td>${(a.mL - b.mL).toFixed(2)}</td>` : '') + '</tr>';
   }
   $('#vol-table').innerHTML = html;
-  const ag = m.agreement;
-  $('#agreement').innerHTML = ag ? `<h2 style="margin-top:14px">Agreement with the supplied expert mask (this case)</h2>
-    <div class="tablewrap"><table class="grid"><tr><th>Region</th><th>Dice</th><th>Sensitivity</th><th>HD95 (mm)</th></tr>
-    ${Object.entries(ag).map(([r, v]) => `<tr><td>${r}</td><td>${fmt(v.dice, 3)}</td><td>${fmt(v.sensitivity, 3)}</td><td>${fmt(v.hd95_mm, 1)}</td></tr>`).join('')}
-    </table></div>` : '';
+  $('#agreement').innerHTML = '';                      // agreement now lives in the expert comparison section
+  renderExpert(m);
+}
+
+// ------------------------------------------------------------------ expert comparison (this case only)
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const sgn = (v, d) => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(d);
+
+function renderExpert(m) {
+  const out = [], ag = m.agreement, rc = m.readings_comparison;
+  if (ag) {
+    const fn = m.expert_mask?.filename;
+    out.push(`<h3>Expert mask${fn ? ` · ${esc(fn)}` : ''}</h3><div class="tablewrap"><table class="grid">
+      <tr><th>Region</th><th>Dice</th><th>Sensitivity</th><th>Precision</th><th>IoU</th><th>HD95 (mm)</th><th>Model voxels</th><th>Expert voxels</th></tr>
+      ${['WT', 'TC', 'ET'].map((r) => { const v = ag[r];
+        return `<tr><td>${r}</td><td><b>${fmt(v.dice, 3)}</b></td><td>${fmt(v.sensitivity, 3)}</td><td>${fmt(v.precision, 3)}</td>
+          <td>${fmt(v.iou, 3)}</td><td>${fmt(v.hd95_mm, 1)}</td><td>${v.pred_voxels.toLocaleString()}</td><td>${v.ref_voxels.toLocaleString()}</td></tr>`; }).join('')}
+      </table></div>
+      ${(m.expert_notes || []).map((n) => `<p class="xnote">${esc(n)}</p>`).join('')}
+      <p class="xdef">Dice = 2 × overlap ÷ (model + expert voxels) · sensitivity = overlap ÷ expert voxels · precision = overlap ÷ model voxels · IoU = overlap ÷ union · HD95 = 95th-percentile surface distance (mm). WT = 1+2+4, TC = 1+4, ET = 4. — = undefined (empty region).</p>`);
+  } else if (m.has_expert && !m.has_prediction) {
+    out.push('<p class="xempty">Expert mask attached; run segmentation to compare it with the model.</p>');
+  }
+  if (rc) {
+    out.push(`<h3>Doctor's volume readings · entered ${esc(m.doctor_readings.entered_utc.replace('T', ' ').slice(0, 16))} UTC</h3>
+      <div class="tablewrap"><table class="grid">
+      <tr><th>Region</th><th>Model (mL)</th><th>Entered (mL)</th><th>Model − entered (mL)</th><th>Absolute (mL)</th><th>Difference (%)</th></tr>
+      ${Object.entries(rc).map(([r, v]) => `<tr><td>${r}</td><td>${v.model_mL.toFixed(2)}</td><td>${v.doctor_mL.toFixed(2)}</td>
+        <td><b>${sgn(v.difference_mL, 2)}</b></td><td>${v.abs_difference_mL.toFixed(2)}</td>
+        <td>${v.percent_difference === null ? '— (entered 0)' : sgn(v.percent_difference, 1) + '%'}</td></tr>`).join('')}
+      </table></div>
+      <p class="xdef">Difference = model − entered; % = difference ÷ entered. Volumes alone cannot give Dice, sensitivity or any
+        overlap score: equal volumes do not mean the same voxels. Upload an expert mask for those.</p>`);
+  }
+  if (!out.length) {
+    out.push(`<p class="xempty">No expert reference for this study yet. Use <b>Expert comparison</b> in the side panel to
+      upload an expert-drawn mask (overlap scores) or enter a doctor's WT / TC / ET volumes (volume differences).</p>`);
+  }
+  $('#expert-results').innerHTML = out.join('');
+  $('#expert-remove').hidden = !m.has_expert;
+  $('#readings-clear').hidden = !m.doctor_readings;
+  const f = $('#readings-form');
+  if (m.doctor_readings && !f.dataset.touched) {
+    for (const r of ['WT', 'TC', 'ET']) f.elements[r].value = m.doctor_readings.volumes_mL[r] ?? '';
+  }
+}
+
+function setMsg(el, text, ok) { el.textContent = text; el.className = `small ${ok ? 'msg-ok' : 'msg-err'}`; }
+
+async function refreshExpert() {
+  applyMeta(await getJSON(`${API}/meta`));
 }
 
 function renderTrust(m) {
@@ -712,9 +758,51 @@ $('#expert-file').addEventListener('change', async (e) => {
     buildMeshes(await getJSON(`${API}/meshes`));
     setCross(S.cross);
     refreshGallery();
-    msg.textContent = 'Expert mask attached. Choose "Expert mask" or "Agreement" under Slices; expert surfaces are in 3D layers.';
+    msg.textContent = 'Expert mask attached. Scores are under “Expert comparison” below the viewer; choose "Expert mask" '
+      + 'or "Agreement" under Slices to see it, and expert surfaces are in 3D layers.';
   } catch (err) { msg.textContent = `Rejected: ${err.message}`; }
   e.target.value = '';
+});
+$('#expert-remove').addEventListener('click', async (e) => {
+  e.target.disabled = true;
+  try {
+    await getJSON(`${API}/expert`, { method: 'DELETE' });
+    delete S.vols.expert;
+    if (S.overlay === 'expert' || S.overlay.startsWith('agree-')) { S.overlay = 'pred'; $('#overlay').value = 'pred'; }
+    await refreshExpert();
+    buildMeshes(await getJSON(`${API}/meshes`));
+    setCross(S.cross); refreshGallery();
+    setMsg($('#expert-msg'), 'Expert mask removed.', true);
+  } catch (err) { setMsg($('#expert-msg'), err.message, false); }
+  e.target.disabled = false;
+});
+$('#readings-form').addEventListener('input', (e) => { e.currentTarget.dataset.touched = '1'; });
+$('#readings-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.currentTarget, body = {}, msg = $('#readings-msg');
+  for (const r of ['WT', 'TC', 'ET']) {
+    const raw = f.elements[r].value.trim();
+    if (raw === '') continue;
+    const v = Number(raw);
+    if (!Number.isFinite(v)) { setMsg(msg, `${r} must be a number of mL.`, false); return; }
+    body[r] = v;
+  }
+  if (!Object.keys(body).length) { setMsg(msg, 'Enter at least one of WT, TC or ET in mL.', false); return; }
+  try {
+    await getJSON(`${API}/readings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    delete f.dataset.touched;
+    await refreshExpert();
+    setMsg(msg, 'Saved. See “Expert comparison” below the viewer.', true);
+    $('#expert-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (err) { setMsg(msg, err.message, false); }
+});
+$('#readings-clear').addEventListener('click', async () => {
+  try {
+    await getJSON(`${API}/readings`, { method: 'DELETE' });
+    const f = $('#readings-form'); f.reset(); delete f.dataset.touched;
+    await refreshExpert();
+    setMsg($('#readings-msg'), 'Readings removed.', true);
+  } catch (err) { setMsg($('#readings-msg'), err.message, false); }
 });
 $('#run-ablation').addEventListener('click', async (e) => {
   e.target.disabled = true; e.target.textContent = 'Running 5 passes…';

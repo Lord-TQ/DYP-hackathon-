@@ -17,6 +17,18 @@ def sensitivity(pred: np.ndarray, ref: np.ndarray):
     return None if r == 0 else float(np.logical_and(pred, ref).sum() / r)
 
 
+def precision(pred: np.ndarray, ref: np.ndarray):
+    """|P∩R| / |P| (positive predictive value). Undefined (None) when the prediction is empty."""
+    p = int(pred.sum())
+    return None if p == 0 else float(np.logical_and(pred, ref).sum() / p)
+
+
+def iou(pred: np.ndarray, ref: np.ndarray):
+    """|P∩R| / |P∪R| (Jaccard). Both empty -> 1.0, matching the Dice convention."""
+    u = int(np.logical_or(pred, ref).sum())
+    return 1.0 if u == 0 else float(np.logical_and(pred, ref).sum() / u)
+
+
 def _surface(mask):
     return mask & ~binary_erosion(mask, iterations=1, border_value=0)
 
@@ -42,6 +54,8 @@ def case_metrics(pred_labels: np.ndarray, ref_labels: np.ndarray, spacing, with_
         out[name] = {
             "dice": dice(p[name], r[name]),
             "sensitivity": sensitivity(p[name], r[name]),
+            "precision": precision(p[name], r[name]),
+            "iou": iou(p[name], r[name]),
             "hd95_mm": hd95(p[name], r[name], spacing) if with_hd95 else None,
             "pred_voxels": int(p[name].sum()),
             "ref_voxels": int(r[name].sum()),
