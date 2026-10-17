@@ -33,38 +33,42 @@
         <p>One 4-channel NIfTI, <em>or</em> the four sequences (T1, T1Gd, T2, FLAIR) as separate files. Optionally add an expert mask (BraTS codes 1/2/4) to compare against.</p>
       </header>
 
-      <div class="analyse-grid">
-        <div>
-          <label class="drop" id="drop">
-            <input type="file" id="file-input" multiple accept=".nii,.gz,.nii.gz">
-            <span class="drop-big">Drop the study here</span>
-            <span class="drop-small">
-              <b>one file</b> with the four sequences stacked (X × Y × Z × 4) &nbsp;·&nbsp; <b>or four files</b> named
-              *_t1, *_t1ce, *_t2, *_flair &nbsp;·&nbsp; optional *_seg mask &nbsp;·&nbsp; .nii / .nii.gz, ≤ 1 GB each
-            </span>
-            <span class="btn ghost small">Choose files</span>
-          </label>
+      <div class="analyse-main">
+        <label class="drop" id="drop">
+          <input type="file" id="file-input" multiple accept=".nii,.gz,.nii.gz" aria-label="Choose study files">
+          <span class="drop-icon" aria-hidden="true">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/><g class="arrow"><path d="M12 15V4"/><path d="M7.5 8.5 12 4l4.5 4.5"/></g>
+            </svg>
+          </span>
+          <span class="drop-big"><span class="when-idle">Drag &amp; drop your MRI study here</span><span class="when-over">Release to add the files</span></span>
+          <span class="drop-or">or <span class="drop-browse">browse your computer</span></span>
+          <span class="drop-types"><span class="chip">.nii</span><span class="chip">.nii.gz</span><span class="chip">≤ 1 GB each</span></span>
+          <span class="drop-small">
+            <b>One file</b> with the four sequences stacked (X × Y × Z × 4), <b>or four files</b> named
+            *_t1, *_t1ce, *_t2, *_flair. An expert mask (*_seg) is optional.
+          </span>
+        </label>
 
-          <div id="manifest" class="manifest" hidden></div>
-          <p id="hint" class="hint" hidden></p>
+        <div id="manifest" class="manifest" hidden></div>
+        <p id="hint" class="hint" hidden></p>
 
-          <div class="run-row">
-            <button class="btn" id="run" disabled>Run analysis <span class="arr">→</span></button>
-            <button class="btn ghost" id="clear" hidden>Clear</button>
-          </div>
-          <div id="error" class="error" role="alert" hidden></div>
+        <div class="run-row">
+          <button class="btn" id="run" disabled>Run analysis <span class="arr">→</span></button>
+          <button class="btn ghost" id="clear" hidden>Clear</button>
+          <span class="run-note">Invalid input is refused with a reason and never reaches the model.</span>
         </div>
+        <div id="error" class="error" role="alert" hidden></div>
 
-        <aside class="log">
-          <p class="eyebrow">Run log</p>
+        <div class="log" id="log" hidden>
+          <p class="eyebrow">Last run</p>
           <ol id="steps" class="steps">
             <li data-step="upload"><span>Upload</span><time></time></li>
             <li data-step="checks"><span>Structural &amp; suitability checks</span><time></time></li>
-            <li data-step="segment"><span>Segmentation (SegResNet, GPU)</span><time></time></li>
+            <li data-step="segment"><span>Segmentation (SegResNet)</span><time></time></li>
             <li data-step="finish"><span>Volumes, surfaces, report</span><time></time></li>
           </ol>
-          <p class="log-note">Invalid input is refused with a reason and never reaches the model.</p>
-        </aside>
+        </div>
       </div>
 
       <div class="four-files" id="four-files">
@@ -77,6 +81,7 @@
         <div class="slots" id="slots">
           <div class="slot" data-role="T1">
             <label class="slot-pick">
+              <span class="slot-icon" aria-hidden="true"></span>
               <span class="slot-name">T1</span>
               <span class="slot-note">native T1-weighted</span>
               <span class="slot-file"></span>
@@ -87,6 +92,7 @@
           </div>
           <div class="slot" data-role="T1Gd">
             <label class="slot-pick">
+              <span class="slot-icon" aria-hidden="true"></span>
               <span class="slot-name">T1Gd</span>
               <span class="slot-note">contrast-enhanced T1 (t1ce)</span>
               <span class="slot-file"></span>
@@ -97,6 +103,7 @@
           </div>
           <div class="slot" data-role="T2">
             <label class="slot-pick">
+              <span class="slot-icon" aria-hidden="true"></span>
               <span class="slot-name">T2</span>
               <span class="slot-note">T2-weighted</span>
               <span class="slot-file"></span>
@@ -107,6 +114,7 @@
           </div>
           <div class="slot" data-role="FLAIR">
             <label class="slot-pick">
+              <span class="slot-icon" aria-hidden="true"></span>
               <span class="slot-name">FLAIR</span>
               <span class="slot-note">T2-FLAIR</span>
               <span class="slot-file"></span>
@@ -117,6 +125,7 @@
           </div>
           <div class="slot" data-role="expert">
             <label class="slot-pick">
+              <span class="slot-icon" aria-hidden="true"></span>
               <span class="slot-name">Expert mask</span>
               <span class="slot-note">optional · BraTS codes 1/2/4</span>
               <span class="slot-file"></span>
@@ -168,6 +177,25 @@
       <button class="btn ghost" id="alert-close">Close</button>
     </div>
   </dialog>
+
+  <div class="loader" id="loader" hidden role="dialog" aria-modal="true" aria-labelledby="loader-stage">
+    <div class="loader-inner">
+      <div class="loader-stage-box">
+        <canvas id="loader-canvas" aria-hidden="true"></canvas>
+        <span class="loader-pct mono" id="loader-pct">0%</span>
+      </div>
+      <p class="eyebrow loader-eyebrow">Analysing your study</p>
+      <h2 class="loader-stage" id="loader-stage" aria-live="polite">Uploading the files</h2>
+      <div class="loader-bar" aria-hidden="true"><i id="loader-bar"></i></div>
+      <ol class="loader-steps" id="loader-steps">
+        <li data-step="upload"><span>Upload</span><time></time></li>
+        <li data-step="checks"><span>Checks</span><time></time></li>
+        <li data-step="segment"><span>Segmentation</span><time></time></li>
+        <li data-step="finish"><span>Volumes &amp; surfaces</span><time></time></li>
+      </ol>
+      <p class="loader-note">The brain is an illustration that builds up as the run progresses. It is not your scan.</p>
+    </div>
+  </div>
 
   <script src="/static/app.js" type="module"></script>
 </body>

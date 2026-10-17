@@ -201,9 +201,92 @@ function render() {
 const steps = {};
 document.querySelectorAll('#steps li').forEach((li) => { steps[li.dataset.step] = li; });
 function step(name, cls, text = '') {
-  const li = steps[name]; li.className = cls; li.querySelector('time').textContent = text;
+  for (const li of [steps[name], $(`#loader-steps li[data-step="${name}"]`)]) {
+    if (!li) continue;
+    li.className = cls; li.querySelector('time').textContent = text;
+  }
+  if (cls === 'run' && LOADER.stages[name]) loaderStage(name);
 }
 const secs = (t0) => ((performance.now() - t0) / 1000).toFixed(1) + ' s';
+
+// ------------------------------------------------------------------ loading screen
+// The server reports no progress during segmentation, so each stage creeps towards its end of the bar and jumps there
+// when the stage really finishes. The brain only ever shows what the bar shows.
+const SEG_KEY = 'voxels.lastSegSeconds';
+const LOADER = {
+  stages: {                                            // [from, to, time constant in s, heading]
+    upload: [0, 0.2, 2, 'Uploading the files'],
+    checks: [0.2, 0.32, 1.5, 'Checking structure and suitability'],
+    segment: [0.32, 0.9, 6, 'Segmenting with SegResNet'],
+    finish: [0.9, 0.985, 1.2, 'Measuring volumes and building surfaces'],
+  },
+  target: 0, shown: 0, stage: null, t0: 0, raf: 0, last: 0, brain: null, open: false,
+};
+const brainModule = $('#loader') ? import('/static/brainloader.js').catch(() => null) : null;
+
+function loaderStage(name) {
+  const [a, b, tau, text] = LOADER.stages[name];
+  let k = tau;
+  if (name === 'segment') {                            // ~85% of the way at the last run's duration
+    let last = 14; try { last = Number(localStorage.getItem(SEG_KEY)) || 14; } catch {}
+    k = Math.max(2, last / 1.9);
+  }
+  LOADER.stage = { a, b, k }; LOADER.t0 = performance.now();
+  LOADER.target = Math.max(LOADER.target, a);
+  $('#loader-stage').textContent = text; $('#loader-stage').classList.remove('done');
+}
+function loaderAt(p) { LOADER.target = Math.max(LOADER.target, p); }        // a real measurement (upload fraction, stage end)
+
+function loaderFrame(t) {
+  if (!LOADER.open) return;
+  LOADER.raf = requestAnimationFrame(loaderFrame);
+  const dt = Math.min(0.1, (t - (LOADER.last || t)) / 1000); LOADER.last = t;
+  const s = LOADER.stage;
+  if (s) LOADER.target = Math.max(LOADER.target, s.a + (s.b - s.a) * (1 - Math.exp(-(t - LOADER.t0) / 1000 / s.k)));
+  const gap = LOADER.target - LOADER.shown;           // smooth, never backwards, at most ~60% of the brain per second
+  if (gap > 0) LOADER.shown += Math.min(gap, Math.max(0.02, gap * 4) * dt, 0.6 * dt);
+  $('#loader-bar').style.width = `${(LOADER.shown * 100).toFixed(1)}%`;
+  $('#loader-pct').textContent = `${Math.floor(LOADER.shown * 100)}%`;
+  LOADER.brain?.draw(LOADER.shown, t);
+}
+
+async function loaderOpen(fresh = true) {
+  const el = $('#loader'); if (!el) return;
+  if (fresh) {
+    Object.assign(LOADER, { target: 0, shown: 0, stage: null });
+    el.querySelectorAll('#loader-steps li').forEach((li) => { li.className = ''; li.querySelector('time').textContent = ''; });
+  }
+  el.classList.remove('closing'); el.hidden = false;
+  document.body.classList.add('loading'); $('main').inert = true;
+  LOADER.open = true; LOADER.last = 0;
+  cancelAnimationFrame(LOADER.raf); LOADER.raf = requestAnimationFrame(loaderFrame);
+  const mod = await brainModule;
+  if (mod && !LOADER.brain) LOADER.brain = mod.createBrain($('#loader-canvas'));   // null without WebGL: bar and steps still work
+}
+
+function loaderClose() {
+  const el = $('#loader'); if (!el || el.hidden) return Promise.resolve();
+  el.classList.add('closing');
+  return new Promise((resolve) => setTimeout(() => {
+    LOADER.open = false; cancelAnimationFrame(LOADER.raf);
+    el.hidden = true; el.classList.remove('closing');
+    document.body.classList.remove('loading'); $('main').inert = false;
+    resolve();
+  }, 350));
+}
+
+// run complete: let the brain finish building, hold it a moment, then fade out
+async function loaderFinish() {
+  if (!LOADER.open) return;
+  LOADER.stage = null; loaderAt(1);
+  $('#loader-stage').textContent = 'Done'; $('#loader-stage').classList.add('done');
+  await new Promise((resolve) => {
+    const wait = () => (LOADER.shown >= 0.999 || !LOADER.open ? resolve() : setTimeout(wait, 50));
+    wait();
+  });
+  await new Promise((r) => setTimeout(r, 650));
+  await loaderClose();
+}
 
 function upload(url, form, onProgress) {
   return new Promise((resolve) => {
@@ -247,14 +330,26 @@ function popup({ kind, title, code, items, note, cont }) {
 const NOT_RUN = 'Nothing was sent to the model and no result was produced.';
 
 async function run(p = plan()) {
+  try {
+    await runSteps(p);
+  } catch (e) {                                         // e.g. the connection dropped mid-run
+    await loaderClose();
+    state.busy = false; refresh();
+    popup({ kind: 'refuse', title: 'The run was interrupted', code: 'CLIENT_ERROR',
+            items: [String(e && e.message || e)], note: 'No result was produced. Check that the server is running and try again.' });
+  }
+}
+
+async function runSteps(p) {
   if (p.problems.length) {
     popup({ kind: 'refuse', title: 'These files cannot be analysed', code: 'CHECKED_IN_BROWSER', items: p.problems,
             note: `${NOT_RUN} Fix the files listed above and press Run again.` });
     return;
   }
   state.busy = true; refresh();
-  $('#error').hidden = true; $('#result').hidden = true;
+  $('#error').hidden = true; $('#result').hidden = true; $('#log').hidden = false;
   Object.keys(steps).forEach((k) => step(k, ''));
+  loaderOpen();
 
   const form = new FormData();
   let url;
@@ -271,29 +366,32 @@ async function run(p = plan()) {
   step('upload', 'run');
   let t1;
   const up = await upload(url, form, (f) => {
-    if (f < 1) step('upload', 'run', `${Math.round(f * 100)}%`);
-    else if (!t1) { t1 = performance.now(); step('upload', 'ok', secs(t0)); step('checks', 'run'); }
+    if (f < 1) { step('upload', 'run', `${Math.round(f * 100)}%`); loaderAt(f * 0.2); }
+    else if (!t1) { t1 = performance.now(); step('upload', 'ok', secs(t0)); loaderAt(0.2); step('checks', 'run'); }
   });
   if (!t1) { t1 = performance.now(); step('upload', 'ok', secs(t0)); }
   if (!up.ok) {
     step('checks', 'fail', 'refused');
+    await loaderClose();
     showError(up.body.error_code, up.body.message);
     state.busy = false; refresh();
     popup({ kind: 'refuse', title: 'The server refused this study', code: up.body.error_code || `HTTP ${up.status}`,
             items: [up.body.message || 'The upload could not be processed.'], note: NOT_RUN });
     return;
   }
-  step('checks', 'ok', secs(t1));
+  step('checks', 'ok', secs(t1)); loaderAt(0.32);
   const sid = up.body.study_id;
   rememberStudy(sid);
   const warns = up.body.warnings || [];
-  if (warns.length && !(await popup({
-    kind: 'warn', title: 'Accepted, with suitability warnings', code: 'SUITABILITY_WARNING', items: warns, cont: true,
-    note: 'The files are structurally valid, but they may not suit this model. Results may be unreliable. '
-      + 'Continue to run the model anyway, or stop here (the upload is deleted automatically within 24 h).',
-  }))) {
-    step('segment', 'fail', 'stopped');
-    state.busy = false; refresh(); return;
+  if (warns.length) {
+    await loaderClose();
+    const go = await popup({
+      kind: 'warn', title: 'Accepted, with suitability warnings', code: 'SUITABILITY_WARNING', items: warns, cont: true,
+      note: 'The files are structurally valid, but they may not suit this model. Results may be unreliable. '
+        + 'Continue to run the model anyway, or stop here (the upload is deleted automatically within 24 h).',
+    });
+    if (!go) { step('segment', 'fail', 'stopped'); state.busy = false; refresh(); return; }
+    loaderOpen(false);
   }
 
   const t2 = performance.now();
@@ -304,13 +402,15 @@ async function run(p = plan()) {
   const r = await seg.json().catch(() => ({}));
   if (!seg.ok) {
     step('segment', 'fail', 'failed');
+    await loaderClose();
     showError(r.error_code || 'SEGMENTATION_FAILED', r.message);
     state.busy = false; refresh();
     popup({ kind: 'refuse', title: 'Segmentation did not complete', code: r.error_code || 'SEGMENTATION_FAILED',
             items: [r.message || 'The model could not process this study.'], note: 'No result was produced.' });
     return;
   }
-  step('segment', 'ok', `${secs(t2)} · model ${r.provenance.inference_seconds}s`);
+  try { localStorage.setItem(SEG_KEY, ((performance.now() - t2) / 1000).toFixed(1)); } catch {}
+  step('segment', 'ok', `${secs(t2)} · model ${r.provenance.inference_seconds}s`); loaderAt(0.9);
 
   const t3 = performance.now();
   step('finish', 'run');
@@ -319,6 +419,7 @@ async function run(p = plan()) {
     fetch(`/api/viewer/${sid}/meshes`).then((x) => x.ok), // warm the surface cache so the viewer opens instantly
   ]);
   step('finish', 'ok', `${secs(t3)} · total ${secs(t0)}`);
+  await loaderFinish();
   showResult(sid, r, meta, up.body);
   state.busy = false; refresh();
 }
@@ -382,7 +483,7 @@ function renderSlots() {
     const s = slots[el.dataset.role], h = s && s.head;
     el.classList.toggle('filled', !!s);
     el.classList.toggle('bad', !!(h && h.error));
-    el.querySelector('.slot-file').textContent = s ? s.file.name : (el.dataset.role === 'expert' ? 'optional' : 'drop a file or click');
+    el.querySelector('.slot-file').textContent = s ? s.file.name : (el.dataset.role === 'expert' ? 'browse (optional)' : 'browse or drop a file');
     el.querySelector('.slot-meta').innerHTML = !s ? '' : h.error ? `<span class="bad">${esc(h.error)}</span>`
       : `${h.dim.join(' × ')} &nbsp;·&nbsp; ${fmtMB(s.file.size)}`;
     el.querySelector('.slot-remove').hidden = !s;
@@ -411,7 +512,7 @@ if (slotsEl) {
   $('#four-clear').addEventListener('click', () => {
     SLOT_ROLES.forEach((r) => delete slots[r]);
     $('#error').hidden = true; $('#result').hidden = true;
-    Object.keys(steps).forEach((k) => step(k, '')); renderSlots();
+    $('#log').hidden = true; Object.keys(steps).forEach((k) => step(k, '')); renderSlots();
   });
   renderSlots();
 }
@@ -427,7 +528,7 @@ if (drop) {
   $('#clear').addEventListener('click', () => {
     state.items = []; state.order = [...DECATHLON_ORDER];
     $('#error').hidden = true; $('#result').hidden = true;
-    Object.keys(steps).forEach((k) => step(k, '')); render();
+    $('#log').hidden = true; Object.keys(steps).forEach((k) => step(k, '')); render();
   });
 }
 
