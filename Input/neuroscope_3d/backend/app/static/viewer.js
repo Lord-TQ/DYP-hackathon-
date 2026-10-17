@@ -120,6 +120,10 @@ function buildPanelTools() {
     panel.append(tools);
     tools.querySelector('.pt-enlarge').addEventListener('click', () => setFocus(panel.classList.contains('big') ? null : panel));
     tools.querySelector('.pt-full').addEventListener('click', () => toggleFullscreen(panel));
+    panel.addEventListener('dblclick', (ev) => {                       // double-click a view to enlarge / restore
+      if (ev.target.closest('button, input, .sctl')) return;
+      setFocus(panel.classList.contains('big') ? null : panel);
+    });
     panel.addEventListener('pointerenter', () => { S.hoverPanel = panel; });
     panel.addEventListener('pointerleave', () => { if (S.hoverPanel === panel) S.hoverPanel = null; });
   }
@@ -331,12 +335,11 @@ function buildGallery() {
     const b = document.createElement('div');
     b.className = `thumb${has ? ' has' : ''}`; b.dataset.k = k;
     b.innerHTML = `<button type="button" class="thumb-go"
-        aria-label="${name} slice ${k + 1}${area ? `, predicted region ${area.toFixed(1)} cm²` : ''}: move the crosshair here">
+        aria-label="${name} slice ${k + 1}${area ? `, predicted region ${area.toFixed(1)} cm²` : ''}: open it large">
         <canvas width="${Math.floor(w / step)}" height="${Math.floor(h / step)}" style="aspect-ratio:${mw} / ${mh}"></canvas>
         <span>${k + 1}${area ? ` · ${area.toFixed(1)} cm²` : ''}</span></button>
       <button type="button" class="thumb-zoom" title="Enlarge this slice" aria-label="Enlarge ${name} slice ${k + 1}">${ICON.enlarge}</button>`;
-    b.querySelector('.thumb-go').addEventListener('click', () => setSlice(V, k));
-    b.querySelector('.thumb-go').addEventListener('dblclick', () => openLightbox(name, k));
+    b.querySelector('.thumb-go').addEventListener('click', () => openLightbox(name, k));
     b.querySelector('.thumb-zoom').addEventListener('click', () => openLightbox(name, k));
     box.append(b); G.thumbs.push(b); G.io.observe(b);
   }
@@ -373,20 +376,31 @@ function markGalleryCurrent() {
   for (const b of G.thumbs) b.classList.toggle('current', b.dataset.k === k);
 }
 
-// Lightbox: one slice at full resolution, same background and overlay; ‹ › or arrow keys step through every slice.
-const LB = { view: 'axial', k: 0 };
+// Lightbox: one slice at full resolution, same background and overlay; ‹ › or arrow keys step through every slice
+// (the views and the 3D crosshair follow). Wheel or + / − zooms, drag pans, Fit resets.
+const LB = { view: 'axial', k: 0, z: 1, x: 0, y: 0 };
 
 function openLightbox(name, k) {
   const dlg = $('#lightbox');
   if (!dlg) return;
   LB.view = name;
+  zoomLightbox(1, true);
   drawLightbox(k);
   if (!dlg.open) dlg.showModal();
+}
+
+function zoomLightbox(z, reset) {
+  LB.z = clamp(z, 1, 8);
+  if (reset || LB.z === 1) { LB.x = 0; LB.y = 0; }
+  $('#lb-stack').style.transform = `translate(${LB.x}px, ${LB.y}px) scale(${LB.z})`;
+  $('#lb-zoom').textContent = `${Math.round(LB.z * 100)}%`;
+  $('#lb-stack').classList.toggle('zoomed', LB.z > 1);
 }
 
 function drawLightbox(k) {
   const V = VIEWS[LB.view], n = [S.X, S.Y, S.Z][V.axis];
   LB.k = clamp(k, 0, n - 1);
+  if (S.cross[V.axis] !== LB.k) setSlice(V, LB.k);                  // keep the views and 3D in step
   const [w, h] = V.wh(), [mw, mh] = V.mm(), c = $('#lb-canvas'), ctx = c.getContext('2d');
   c.width = w; c.height = h; c.style.aspectRatio = `${mw} / ${mh}`;
   const img = ctx.createImageData(w, h), d = img.data, sc = shadeCtx();
@@ -405,11 +419,27 @@ function initLightbox() {
   if (!dlg) return;
   dlg.querySelectorAll('.lb-nav').forEach((b) => b.addEventListener('click', () => drawLightbox(LB.k + Number(b.dataset.d))));
   $('#lb-close').addEventListener('click', () => dlg.close());
-  $('#lb-goto').addEventListener('click', () => { dlg.close(); setSlice(VIEWS[LB.view], LB.k); });
+  $('#lb-goto').addEventListener('click', () => { dlg.close(); $('.views').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  $('#lb-in').addEventListener('click', () => zoomLightbox(LB.z * 1.5));
+  $('#lb-out').addEventListener('click', () => zoomLightbox(LB.z / 1.5));
+  $('#lb-fit').addEventListener('click', () => zoomLightbox(1, true));
+  const frame = dlg.querySelector('.lb-frame');
+  frame.addEventListener('wheel', (ev) => { ev.preventDefault(); zoomLightbox(LB.z * Math.exp(-ev.deltaY * 0.0015)); }, { passive: false });
+  let drag = null;
+  frame.addEventListener('pointerdown', (ev) => {
+    if (LB.z === 1) return;
+    drag = [ev.clientX - LB.x, ev.clientY - LB.y]; frame.setPointerCapture(ev.pointerId);
+  });
+  frame.addEventListener('pointermove', (ev) => { if (drag) { LB.x = ev.clientX - drag[0]; LB.y = ev.clientY - drag[1]; zoomLightbox(LB.z); } });
+  frame.addEventListener('pointerup', () => { drag = null; });
+  frame.addEventListener('dblclick', () => zoomLightbox(LB.z > 1 ? 1 : 2.5, LB.z > 1));
   dlg.addEventListener('click', (ev) => { if (ev.target === dlg) dlg.close(); });        // click on the backdrop
   dlg.addEventListener('keydown', (ev) => {
     const d = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1, PageUp: 10, PageDown: -10 }[ev.key];
     if (d) { ev.preventDefault(); drawLightbox(LB.k + d); }
+    else if (ev.key === '+' || ev.key === '=') zoomLightbox(LB.z * 1.5);
+    else if (ev.key === '-') zoomLightbox(LB.z / 1.5);
+    else if (ev.key === '0') zoomLightbox(1, true);
   });
 }
 
@@ -648,7 +678,7 @@ async function main() {
     buildMeshes(await getJSON(`${API}/meshes`));
     update3DCross();
     status('Ready. Click or drag in a slice; change slice with the slider, ‹ ›, ▶, the mouse wheel or ↑/↓ over a view; '
-      + 'or click a 3D surface. Every slice is also listed under “All slices”.');
+      + 'or click a 3D surface. Double-click a view (or its ↗ button) to enlarge it; click any slice under “All slices” to open it large.');
   } catch (e) { status(`Error: ${e.message}`, true); console.error(e); }
 }
 

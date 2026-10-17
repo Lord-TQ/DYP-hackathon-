@@ -78,10 +78,11 @@ table.grid td b { color: var(--fg); font-weight: 500; }
   margin-top: 10px; padding-right: 4px; }
 .thumb { position: relative; background: #000; border: 1px solid var(--line); }
 .thumb-go { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 4px; margin: 0; background: none; border: 0; text-align: left; }
-.thumb-zoom { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; padding: 3px; margin: 0; opacity: 0; transition: opacity .15s;
-  background: rgba(18, 17, 15, .8); }
-.thumb:hover .thumb-zoom, .thumb-zoom:focus-visible { opacity: 1; }
-@media (hover: none) { .thumb-zoom { opacity: 1; } }
+.thumb-go { cursor: zoom-in; }
+.thumb-go:hover canvas { outline: 1px solid var(--fg); }
+.thumb-zoom { position: absolute; top: 6px; right: 6px; opacity: .8; }
+.thumb:hover .thumb-zoom { opacity: 1; }
+.thumb .thumb-zoom { width: 24px; height: 24px; padding: 3px; }
 .thumb canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; background: #000; }
 .thumb span { font: 400 10.5px var(--mono); color: var(--muted); }
 .thumb.has span { color: var(--et); }
@@ -122,8 +123,13 @@ table.grid td b { color: var(--fg); font-weight: 500; }
 .lb-body { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; background: #000; }
 .lb-nav { height: 100%; min-height: 80px; margin: 0; border: 0; background: #0d0c0b; font-size: 28px; color: var(--muted); }
 .lb-nav:hover { color: var(--fg); background: var(--panel-2); }
-.lb-frame { display: flex; justify-content: center; padding: 26px 24px; }
-.lb-stack { position: relative; max-width: 100%; }
+.lb-frame { display: flex; justify-content: center; padding: 26px 24px; overflow: hidden; touch-action: none; }
+.lb-stack { position: relative; max-width: 100%; transform-origin: 50% 50%; }
+.lb-stack.zoomed { cursor: grab; }
+.lb-stack.zoomed .olabel { display: none; }
+.lb-actions { align-items: center; }
+.lb-actions #lb-in, .lb-actions #lb-out { width: 30px; padding: 4px 0; font: 500 15px/1 var(--mono); }
+.lb-zoom { min-width: 3.6em; text-align: center; font-size: 12px; color: var(--muted); }
 .lb-frame canvas { display: block; height: min(calc(100vh - 190px), 900px); max-width: 100%; width: auto; object-fit: contain; image-rendering: pixelated; }
 .lb-stack .olabel.l { left: -18px; } .lb-stack .olabel.r { right: -18px; } .lb-stack .olabel.t { top: -21px; } .lb-stack .olabel.b { bottom: -21px; }
 .lb-foot { margin: 0; padding: 8px 14px 10px; color: var(--muted); font: 400 11.5px var(--mono); border-top: 1px solid var(--line); }
