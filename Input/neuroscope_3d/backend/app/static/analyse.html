@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analyse a study · NeuroScope 3D</title>
+  <meta name="description" content="Research and teaching prototype: suspected tumour regions predicted by a pretrained model on brain MRI, estimated volumes, 3D and linked-slice viewer.">
+  <link rel="stylesheet" href="/static/base.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="safety" role="note">
+    <span>Research &amp; teaching prototype</span><span>Not a diagnosis</span><span>Not clinically validated</span><span>Uploads deleted within 24 h</span>
+  </div>
+
+  <header class="nav">
+    <a class="wordmark" href="/">Neuro<em>scope</em><sup>3D</sup></a>
+    <ul>
+      <li><a href="/analyse" aria-current="page">Analyse</a></li>
+      <li><a href="/#method">Method</a></li>
+      <li><a href="/#evaluation">Evaluation</a></li>
+      <li><a href="/#limits">Limits</a></li>
+      <li><a href="/#privacy">Privacy</a></li>
+    </ul>
+    <span class="status mono" id="status"><i class="dot"></i>checking…</span>
+  </header>
+
+  <main class="page-analyse">
+    <section id="analyse" class="block">
+      <header class="block-head">
+        <span class="num">01</span>
+        <h2>Analyse a study</h2>
+        <p>One 4-channel NIfTI, <em>or</em> the four sequences (T1, T1Gd, T2, FLAIR) as separate files. Optionally add an expert mask (BraTS codes 1/2/4) to compare against.</p>
+      </header>
+
+      <div class="analyse-grid">
+        <div>
+          <label class="drop" id="drop">
+            <input type="file" id="file-input" multiple accept=".nii,.gz,.nii.gz">
+            <span class="drop-big">Drop the study here</span>
+            <span class="drop-small">
+              <b>one file</b> with the four sequences stacked (X × Y × Z × 4) &nbsp;·&nbsp; <b>or four files</b> named
+              *_t1, *_t1ce, *_t2, *_flair &nbsp;·&nbsp; optional *_seg mask &nbsp;·&nbsp; .nii / .nii.gz, ≤ 1 GB each
+            </span>
+            <span class="btn ghost small">Choose files</span>
+          </label>
+
+          <div id="manifest" class="manifest" hidden></div>
+          <p id="hint" class="hint" hidden></p>
+
+          <div class="run-row">
+            <button class="btn" id="run" disabled>Run analysis <span class="arr">→</span></button>
+            <button class="btn ghost" id="clear" hidden>Clear</button>
+          </div>
+          <div id="error" class="error" role="alert" hidden></div>
+        </div>
+
+        <aside class="log">
+          <p class="eyebrow">Run log</p>
+          <ol id="steps" class="steps">
+            <li data-step="upload"><span>Upload</span><time></time></li>
+            <li data-step="checks"><span>Structural &amp; suitability checks</span><time></time></li>
+            <li data-step="segment"><span>Segmentation (SegResNet, GPU)</span><time></time></li>
+            <li data-step="finish"><span>Volumes, surfaces, report</span><time></time></li>
+          </ol>
+          <p class="log-note">Invalid input is refused with a reason and never reaches the model.</p>
+        </aside>
+      </div>
+
+      <div id="result" class="result" hidden></div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <div>
+      <a class="wordmark" href="/">Neuro<em>scope</em><sup>3D</sup></a>
+      <p id="disclaimer-full">Research and teaching prototype. Outputs are suspected tumour regions predicted by the model and estimated volumes. Not a diagnosis; not clinically validated; not for clinical use.</p>
+    </div>
+    <div>
+      <p class="eyebrow">Model</p>
+      <p>MONAI <span class="mono">brats_mri_segmentation</span> v0.5.4, SegResNet (Myronenko, 2018). Apache-2.0.</p>
+    </div>
+    <div>
+      <p class="eyebrow">Data</p>
+      <p>Medical Segmentation Decathlon (Antonelli et al., 2022), derived from BraTS (Menze et al., 2015; Bakas et al., 2017, 2018). Public, de-identified.</p>
+    </div>
+    <div>
+      <p class="eyebrow">Elsewhere</p>
+      <p><a href="/docs">API docs</a> · <a href="/backup">Precomputed sample</a></p>
+    </div>
+  </footer>
+
+  <dialog id="alert-dialog" class="alert-dialog" aria-labelledby="alert-title" aria-describedby="alert-list">
+    <p class="alert-kind" id="alert-kind">Input refused</p>
+    <h3 id="alert-title"></h3>
+    <p class="alert-code mono" id="alert-code"></p>
+    <ul id="alert-list" class="alert-list"></ul>
+    <p class="alert-note" id="alert-note"></p>
+    <div class="alert-actions">
+      <button class="btn" id="alert-continue" hidden>Continue anyway <span class="arr">→</span></button>
+      <button class="btn ghost" id="alert-close">Close</button>
+    </div>
+  </dialog>
+
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>

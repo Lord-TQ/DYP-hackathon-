@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.core.exceptions import StudyExpiredError, StudyNotFoundError
 from app.core.security import BASE_STUDY_DIR, cleanup_study_dir
@@ -118,6 +118,13 @@ class StudyStore:
             return study.validated and not study.is_expired
         except Exception:
             return False
+
+    def list_studies(self) -> List[ValidatedStudy]:
+        """Unexpired studies, soonest deletion first (expired ones are deleted on the way)."""
+        self.clean_expired_studies()
+        with self._lock:
+            studies = list(self._studies.values())
+        return sorted(studies, key=lambda s: s.created_timestamp + s.ttl_seconds)
 
     def delete_study(self, study_id: str):
         """Remove a study and delete its temporary files from disk."""

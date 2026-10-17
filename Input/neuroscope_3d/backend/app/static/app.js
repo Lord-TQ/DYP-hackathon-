@@ -1,4 +1,6 @@
-// Landing + analysis workflow. One drop zone: a single 4-channel NIfTI, or four sequence files (+ optional mask).
+// Landing page (/) and analyse page (/analyse). Each part below runs only on the page that has its elements.
+// Analyse: one drop zone, a single 4-channel NIfTI or four sequence files (+ optional expert mask).
+// Anything refused (here or by the server) or accepted with warnings is shown in a pop-up dialog.
 const $ = (s, el = document) => el.querySelector(s);
 const SEQS = ['T1', 'T1Gd', 'T2', 'FLAIR'];
 const DECATHLON_ORDER = ['FLAIR', 'T1', 'T1Gd', 'T2'];
@@ -11,6 +13,7 @@ async function loadAbout() {
     const a = await (await fetch('/api/about')).json();
     $('#status').innerHTML = `<i class="dot ${a.cuda ? 'on' : ''}"></i>${a.cuda ? 'GPU ready' : 'CPU only'} · ${esc(a.device)}`;
     $('#disclaimer-full').textContent = a.disclaimer;
+    if (!$('#eval-table')) return;                     // landing-only sections below
     const ev = a.evaluation;
     if (ev) {
       $('#fig-wt').textContent = ev.summary.WT.dice_mean.toFixed(3);
@@ -40,6 +43,7 @@ async function loadAbout() {
 // ------------------------------------------------------------------ hero plate: axial sweep
 async function startPlate() {
   const canvas = $('#plate');
+  if (!canvas) return;
   let meta;
   try { meta = await (await fetch('/static/hero/plate.json')).json(); } catch { return; }
   const img = new Image();
@@ -140,7 +144,7 @@ function plan() {
     else if (h.error) problems.push(`${n} cannot be read as NIfTI (${h.error}).`);
     else if (it.role !== 'study4d') {
       const nd = h.ndim === 4 && h.dim[3] === 1 ? 3 : h.ndim;
-      if (nd !== 3) problems.push(`${n} is ${nd}D (${h.dim.join(' × ')}); each sequence must be a 3D volume.`);
+      if (nd !== 3) problems.push(`${n} is ${nd}D (${h.dim.join(' × ')}); ${it.role === 'expert' ? 'the expert mask' : 'each sequence'} must be a 3D volume.`);
     }
   }
   if (state.items.some((it) => !it.role)) problems.push('Assign a sequence to every file (or mark it “ignore”).');
@@ -149,14 +153,12 @@ function plan() {
   if (four.length && seqs.length) problems.push('Use either one 4-channel file or four sequence files, not both.');
   if (four.length === 1) {
     if (new Set(state.order).size !== 4) problems.push('Each channel must map to a different sequence.');
-    return { mode: '4d', four: four[0], expert: experts[0], problems };
+    return { mode: '4d', four: four[0], seqs, expert: experts[0], problems };
   }
-  const missing = SEQS.filter((s) => !seqs.some((it) => it.role === s));
-  const dupes = SEQS.filter((s) => seqs.filter((it) => it.role === s).length > 1);
-  if (seqs.length || !four.length) {
-    if (missing.length) problems.push(`Missing: ${missing.join(', ')}.`);
-    if (dupes.length) problems.push(`More than one file for: ${dupes.join(', ')}.`);
-  }
+  const missing = SEQS.filter((q) => !seqs.some((it) => it.role === q));
+  const dupes = SEQS.filter((q) => seqs.filter((it) => it.role === q).length > 1);
+  if (missing.length) problems.push(`Missing sequence: ${missing.join(', ')}. Upload one 4-channel file, or all four of T1, T1Gd, T2 and FLAIR.`);
+  if (dupes.length) problems.push(`More than one file for: ${dupes.join(', ')}.`);
   const shapes = new Set(seqs.filter((it) => it.head.dim && it.head.ndim >= 3).map((it) => it.head.dim.slice(0, 3).join('×')));
   if (shapes.size > 1) problems.push(`The sequences have different grids (${[...shapes].join(' vs ')}); they must be co-registered.`);
   return { mode: '4files', seqs, expert: experts[0], problems };
@@ -190,9 +192,9 @@ function render() {
   const hint = $('#hint');
   hint.hidden = false;
   hint.innerHTML = p.problems.length ? `<span class="bad">${p.problems.map(esc).join(' ')}</span>`
-    : p.mode === '4d' ? `Ready: one 4-channel study${p.expert ? ' + expert mask' : ''}. It will be split into four sequences on the server.`
+    : p.mode === '4d' ? `Ready: one 4-channel study (${state.order.join(', ')})${p.expert ? ' + expert mask' : ''}. It is split into four sequences on the server.`
       : `Ready: T1, T1Gd, T2 and FLAIR${p.expert ? ' + expert mask' : ''}.`;
-  $('#run').disabled = p.problems.length > 0 || state.busy;
+  $('#run').disabled = state.busy;                      // problems are explained in a pop-up when Run is pressed
 }
 
 // ------------------------------------------------------------------ run
@@ -220,9 +222,37 @@ function showError(code, msg) {
   e.innerHTML = `<b>${esc(code || 'ERROR')}</b>${esc(msg || 'Something went wrong.')}`;
 }
 
+// Pop-up for refusals and warnings. Resolves true for "Continue", false for "Close"/"Stop" or Escape.
+function popup({ kind, title, code, items, note, cont }) {
+  const dlg = $('#alert-dialog');
+  dlg.className = `alert-dialog ${kind}`;
+  $('#alert-kind').textContent = kind === 'warn' ? 'Warning' : 'Input refused';
+  $('#alert-title').textContent = title;
+  $('#alert-code').textContent = code || '';
+  $('#alert-code').hidden = !code;
+  $('#alert-list').innerHTML = items.map((x) => `<li>${esc(x)}</li>`).join('');
+  $('#alert-note').textContent = note || '';
+  $('#alert-continue').hidden = !cont;
+  $('#alert-close').textContent = cont ? 'Stop' : 'Close';
+  return new Promise((resolve) => {
+    const done = (v) => { dlg.close(); resolve(v); };
+    $('#alert-continue').onclick = () => done(true);
+    $('#alert-close').onclick = () => done(false);
+    dlg.oncancel = (ev) => { ev.preventDefault(); done(false); };
+    dlg.showModal();
+    (cont ? $('#alert-continue') : $('#alert-close')).focus();
+  });
+}
+
+const NOT_RUN = 'Nothing was sent to the model and no result was produced.';
+
 async function run() {
   const p = plan();
-  if (p.problems.length) return;
+  if (p.problems.length) {
+    popup({ kind: 'refuse', title: 'These files cannot be analysed', code: 'CHECKED_IN_BROWSER', items: p.problems,
+            note: `${NOT_RUN} Fix the files listed above and press Run again.` });
+    return;
+  }
   state.busy = true; render();
   $('#error').hidden = true; $('#result').hidden = true;
   Object.keys(steps).forEach((k) => step(k, ''));
@@ -249,10 +279,23 @@ async function run() {
   if (!up.ok) {
     step('checks', 'fail', 'refused');
     showError(up.body.error_code, up.body.message);
-    state.busy = false; render(); return;
+    state.busy = false; render();
+    popup({ kind: 'refuse', title: 'The server refused this study', code: up.body.error_code || `HTTP ${up.status}`,
+            items: [up.body.message || 'The upload could not be processed.'], note: NOT_RUN });
+    return;
   }
   step('checks', 'ok', secs(t1));
   const sid = up.body.study_id;
+  rememberStudy(sid);
+  const warns = up.body.warnings || [];
+  if (warns.length && !(await popup({
+    kind: 'warn', title: 'Accepted, with suitability warnings', code: 'SUITABILITY_WARNING', items: warns, cont: true,
+    note: 'The files are structurally valid, but they may not suit this model. Results may be unreliable. '
+      + 'Continue to run the model anyway, or stop here (the upload is deleted automatically within 24 h).',
+  }))) {
+    step('segment', 'fail', 'stopped');
+    state.busy = false; render(); return;
+  }
 
   const t2 = performance.now();
   step('segment', 'run');
@@ -263,7 +306,10 @@ async function run() {
   if (!seg.ok) {
     step('segment', 'fail', 'failed');
     showError(r.error_code || 'SEGMENTATION_FAILED', r.message);
-    state.busy = false; render(); return;
+    state.busy = false; render();
+    popup({ kind: 'refuse', title: 'Segmentation did not complete', code: r.error_code || 'SEGMENTATION_FAILED',
+            items: [r.message || 'The model could not process this study.'], note: 'No result was produced.' });
+    return;
   }
   step('segment', 'ok', `${secs(t2)} · model ${r.provenance.inference_seconds}s`);
 
@@ -318,16 +364,106 @@ function showResult(sid, r, meta, up) {
 
 // ------------------------------------------------------------------ wiring
 const drop = $('#drop'), input = $('#file-input');
-input.addEventListener('change', () => { addFiles([...input.files]); input.value = ''; });
-['dragenter', 'dragover'].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add('over'); }));
-['dragleave', 'drop'].forEach((e) => drop.addEventListener(e, () => drop.classList.remove('over')));
-drop.addEventListener('drop', (ev) => { ev.preventDefault(); addFiles([...ev.dataTransfer.files]); });
-$('#run').addEventListener('click', run);
-$('#clear').addEventListener('click', () => {
-  state.items = []; state.order = [...DECATHLON_ORDER];
-  $('#error').hidden = true; $('#result').hidden = true;
-  Object.keys(steps).forEach((k) => step(k, '')); render();
-});
+if (drop) {
+  input.addEventListener('change', () => { addFiles([...input.files]); input.value = ''; });
+  ['dragenter', 'dragover'].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((e) => drop.addEventListener(e, () => drop.classList.remove('over')));
+  drop.addEventListener('drop', (ev) => { ev.preventDefault(); addFiles([...ev.dataTransfer.files]); });
+  $('#run').addEventListener('click', run);
+  $('#clear').addEventListener('click', () => {
+    state.items = []; state.order = [...DECATHLON_ORDER];
+    $('#error').hidden = true; $('#result').hidden = true;
+    Object.keys(steps).forEach((k) => step(k, '')); render();
+  });
+}
+
+// ------------------------------------------------------------------ privacy & security: retention list + countdown
+// This browser remembers the IDs of studies it uploaded (and nothing else), so only it is shown their file names.
+const MINE_KEY = 'neuroscope.myStudies';
+function myStudies() {
+  try { const v = JSON.parse(localStorage.getItem(MINE_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+function setMyStudies(ids) { try { localStorage.setItem(MINE_KEY, JSON.stringify(ids.slice(-50))); } catch {} }
+function rememberStudy(sid) { const ids = myStudies(); if (!ids.includes(sid)) setMyStudies([...ids, sid]); }
+
+const hms = (s) => {
+  s = Math.max(0, Math.floor(s));
+  return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((n) => String(n).padStart(2, '0')).join(':');
+};
+
+async function startPrivacy() {
+  const list = $('#pv-list');
+  if (!list) return;
+  const ring = $('#pv-ring'), clock = $('#pv-clock'), label = $('#pv-clock-label'), note = $('#pv-clock-note');
+  $('#pv-ticks').innerHTML = Array.from({ length: 24 }, (_, h) => {
+    const a = (h / 24) * 2 * Math.PI, r1 = h % 6 ? 44 : 40;
+    return `<line x1="${60 + r1 * Math.sin(a)}" y1="${60 - r1 * Math.cos(a)}" x2="${60 + 47 * Math.sin(a)}" y2="${60 - 47 * Math.cos(a)}"/>`;
+  }).join('');
+  let data = null, mine = {}, offset = 0;
+  const DAY = 24 * 3600;
+
+  async function refresh() {
+    try {
+      data = await (await fetch('/api/privacy/retention', { cache: 'no-store' })).json();
+      offset = data.now_ts * 1000 - Date.now();
+      $('#pv-ttl').textContent = data.ttl_hours;
+      $('#pv-sweep').textContent = data.sweep_minutes;
+      const ids = myStudies();
+      if (ids.length) {
+        const r = await (await fetch('/api/privacy/retention/mine', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ study_ids: ids }),
+        })).json();
+        setMyStudies(r.live_ids);
+        mine = Object.fromEntries(r.studies.map((x) => [x.ref, x.files]));
+      } else mine = {};
+      render();
+    } catch {
+      list.innerHTML = '<tr><td colspan="5">Retention data unavailable (is the server running?).</td></tr>';
+    }
+  }
+
+  function render() {
+    if (!data.studies.length) {
+      list.innerHTML = '<tr><td colspan="5">Nothing is stored right now.</td></tr>';
+      return;
+    }
+    list.innerHTML = data.studies.map((s) => {
+      const files = mine[s.ref];
+      const detail = files ? `<tr class="pv-files"><td></td><td colspan="4"><details><summary>${files.length} files from this browser, all deleted together</summary>
+        <ul>${files.map((f) => `<li><span>${esc(f.name)}</span><span class="mono">${fmtMB(f.bytes)}</span></li>`).join('')}</ul></details></td></tr>` : '';
+      return `<tr><td class="mono">${esc(s.ref)}</td><td>${s.kind === 'upload' ? (files ? 'Your upload' : 'Upload') : 'Precomputed sample'}</td>
+        <td>${s.n_files}</td><td>${fmtMB(s.total_bytes)}</td><td class="mono" data-exp="${s.expires_ts}">—</td></tr>${detail}`;
+    }).join('');
+    tick();
+  }
+
+  function tick() {
+    if (!data) return;
+    const now = (Date.now() + offset) / 1000;
+    list.querySelectorAll('td[data-exp]').forEach((td) => {
+      const left = Number(td.dataset.exp) - now;
+      td.textContent = left > 0 ? hms(left) : `due · within ${data.sweep_minutes} min`;
+    });
+    const next = data.studies.find((s) => s.expires_ts - now > -data.sweep_minutes * 60);
+    if (next) {
+      const left = next.expires_ts - now;
+      label.textContent = 'Next deletion in';
+      clock.textContent = left > 0 ? hms(left) : '00:00:00';
+      note.textContent = `study ${next.ref} · ${next.n_files} files · ${fmtMB(next.total_bytes)}`;
+      ring.style.strokeDashoffset = 1000 * (1 - Math.max(0, left) / DAY);
+    } else {
+      label.textContent = 'Each new upload is kept for';
+      clock.textContent = hms(data.ttl_hours * 3600);
+      note.textContent = 'nothing stored right now';
+      ring.style.strokeDashoffset = 1000 * (1 - (data.ttl_hours * 3600) / DAY);
+    }
+  }
+
+  await refresh();
+  setInterval(tick, 1000);
+  setInterval(refresh, 60000);
+}
 
 loadAbout();
 startPlate();
+startPrivacy();

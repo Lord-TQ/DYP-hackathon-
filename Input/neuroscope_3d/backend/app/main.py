@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import app.core.paths  # noqa: F401
-from app.api import backup, segmentation, upload, viewer
+from app.api import backup, privacy, segmentation, upload, viewer
 from app.core.exceptions import NIfTIValidationError
 from app.services.study_store import study_store
 
@@ -60,6 +60,7 @@ app.include_router(upload.router)
 app.include_router(segmentation.router)
 app.include_router(viewer.router)
 app.include_router(backup.router)
+app.include_router(privacy.router)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 
 # Paths for frontend web app
@@ -86,6 +87,7 @@ if (FRONTEND_DIST / "assets").exists():
 
 
 STATIC_INDEX = Path(__file__).resolve().parent / "static" / "index.html"
+STATIC_ANALYSE = Path(__file__).resolve().parent / "static" / "analyse.html"
 
 
 @app.get("/api/about", tags=["System"])
@@ -106,6 +108,12 @@ def about():
         "disclaimer": DISCLAIMER,
         "upload_ttl_hours": round(study_store.ttl_seconds / 3600, 1),
     }
+
+
+@app.get("/analyse", response_class=HTMLResponse, tags=["Web Interface"])
+async def serve_analyse():
+    """Serve the analysis workflow: drop a study, run the model, open the viewer and report."""
+    return FileResponse(str(STATIC_ANALYSE), headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)

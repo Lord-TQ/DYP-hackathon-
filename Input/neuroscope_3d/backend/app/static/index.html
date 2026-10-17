@@ -16,10 +16,11 @@
   <header class="nav">
     <a class="wordmark" href="/">Neuro<em>scope</em><sup>3D</sup></a>
     <ul>
-      <li><a href="#analyse">Analyse</a></li>
+      <li><a href="/analyse">Analyse</a></li>
       <li><a href="#method">Method</a></li>
       <li><a href="#evaluation">Evaluation</a></li>
       <li><a href="#limits">Limits</a></li>
+      <li><a href="#privacy">Privacy</a></li>
     </ul>
     <span class="status mono" id="status"><i class="dot"></i>checking…</span>
   </header>
@@ -36,7 +37,7 @@
           never leaves this machine.
         </p>
         <div class="cta">
-          <a class="btn" href="#analyse">Analyse a study <span class="arr">→</span></a>
+          <a class="btn" href="/analyse">Analyse a study <span class="arr">→</span></a>
           <a class="btn ghost" href="/backup" title="Opens a precomputed case, clearly labelled as such">Precomputed sample</a>
         </div>
         <dl class="figures" id="figures">
@@ -62,53 +63,9 @@
       </figure>
     </section>
 
-    <section id="analyse" class="block">
-      <header class="block-head">
-        <span class="num">01</span>
-        <h2>Analyse a study</h2>
-        <p>One 4-channel NIfTI, <em>or</em> the four sequences as separate files. Add an expert mask (BraTS codes 1/2/4) to compare against.</p>
-      </header>
-
-      <div class="analyse-grid">
-        <div>
-          <label class="drop" id="drop">
-            <input type="file" id="file-input" multiple accept=".nii,.gz,.nii.gz">
-            <span class="drop-big">Drop the study here</span>
-            <span class="drop-small">
-              <b>one file</b> with the four sequences stacked (X × Y × Z × 4) &nbsp;·&nbsp; <b>or four files</b> named
-              *_t1, *_t1ce, *_t2, *_flair &nbsp;·&nbsp; optional *_seg mask &nbsp;·&nbsp; .nii / .nii.gz, ≤ 1 GB each
-            </span>
-            <span class="btn ghost small">Choose files</span>
-          </label>
-
-          <div id="manifest" class="manifest" hidden></div>
-          <p id="hint" class="hint" hidden></p>
-
-          <div class="run-row">
-            <button class="btn" id="run" disabled>Run analysis <span class="arr">→</span></button>
-            <button class="btn ghost" id="clear" hidden>Clear</button>
-          </div>
-          <div id="error" class="error" role="alert" hidden></div>
-        </div>
-
-        <aside class="log">
-          <p class="eyebrow">Run log</p>
-          <ol id="steps" class="steps">
-            <li data-step="upload"><span>Upload</span><time></time></li>
-            <li data-step="checks"><span>Structural &amp; suitability checks</span><time></time></li>
-            <li data-step="segment"><span>Segmentation (SegResNet, GPU)</span><time></time></li>
-            <li data-step="finish"><span>Volumes, surfaces, report</span><time></time></li>
-          </ol>
-          <p class="log-note">Invalid input is refused with a reason and never reaches the model.</p>
-        </aside>
-      </div>
-
-      <div id="result" class="result" hidden></div>
-    </section>
-
     <section id="method" class="block">
       <header class="block-head">
-        <span class="num">02</span>
+        <span class="num">01</span>
         <h2>Method</h2>
         <p>Every step below is the code path the judges' case runs through. Nothing is looked up from a stored dataset.</p>
       </header>
@@ -133,7 +90,7 @@
 
     <section id="evaluation" class="block">
       <header class="block-head">
-        <span class="num">03</span>
+        <span class="num">02</span>
         <h2>Evaluation</h2>
         <p id="eval-intro">Dice and sensitivity per region on held-out labelled cases.</p>
       </header>
@@ -150,12 +107,53 @@
 
     <section id="limits" class="block">
       <header class="block-head">
-        <span class="num">04</span>
+        <span class="num">03</span>
         <h2>Limits</h2>
         <p>Where this model can be wrong, and what it will never claim.</p>
       </header>
       <ol class="limits" id="limits-list"></ol>
       <p class="never">No diagnosis · no grading · no genetics · no prognosis · no treatment advice · no surgical or radiotherapy planning · no clinical validation or regulatory approval.</p>
+    </section>
+
+    <section id="privacy" class="block">
+      <header class="block-head">
+        <span class="num">04</span>
+        <h2>Privacy and Security</h2>
+        <p>Every upload is deleted automatically. This is what the server holds right now, and when each item goes.</p>
+      </header>
+
+      <div class="privacy-grid">
+        <figure class="countdown" aria-live="off">
+          <svg viewBox="0 0 120 120" aria-hidden="true">
+            <circle class="track" cx="60" cy="60" r="52"></circle>
+            <circle class="sweep" id="pv-ring" cx="60" cy="60" r="52" pathLength="1000"></circle>
+            <g class="ticks" id="pv-ticks"></g>
+          </svg>
+          <div class="countdown-read">
+            <span class="eyebrow" id="pv-clock-label">Next deletion in</span>
+            <time class="clock mono" id="pv-clock">--:--:--</time>
+            <small id="pv-clock-note">loading…</small>
+          </div>
+        </figure>
+
+        <div class="retention">
+          <p class="eyebrow">Stored on this server</p>
+          <div class="retention-scroll">
+            <table class="eval pv-table">
+              <thead><tr><th>Ref</th><th>What</th><th>Files</th><th>Size</th><th>Deleted in</th></tr></thead>
+              <tbody id="pv-list"><tr><td colspan="5">Loading…</td></tr></tbody>
+            </table>
+          </div>
+          <p class="aside" id="pv-mine-note">File names are shown only for studies uploaded from this browser; other uploads appear as a count and size.</p>
+        </div>
+      </div>
+
+      <ol class="pv-facts">
+        <li><b>Where.</b> Uploads and everything made from them (sequences, label map, surfaces, report data) sit in one folder per study in the server's temporary directory, on the machine running NeuroScope.</li>
+        <li><b>When.</b> Each study is deleted <span id="pv-ttl">23</span> h after upload. The server checks at startup, on every access and every <span id="pv-sweep">10</span> minutes, so nothing outlives 24 h.</li>
+        <li><b>What leaves.</b> No cloud, analytics or AI-service code was found by the repository's leak audit (<span class="mono">scripts/audit_no_leaks.py</span>). The model runs on this machine.</li>
+        <li><b>Who can open a study.</b> Only someone holding its link: each study ID is 128 random bits. There are no accounts, so do not share links and upload only public, de-identified research data.</li>
+      </ol>
     </section>
   </main>
 
