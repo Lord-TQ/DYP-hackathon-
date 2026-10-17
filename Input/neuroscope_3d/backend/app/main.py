@@ -4,6 +4,7 @@ Provides NIfTI upload & validation API, segmentation routing, health checks,
 and serves the React web interface.
 """
 
+import mimetypes
 import os
 from pathlib import Path
 
@@ -14,14 +15,16 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import app.core.paths  # noqa: F401
-from app.api import backup, segmentation, upload, viewer
+from app.api import backup, privacy, segmentation, upload, viewer
 from app.core.exceptions import NIfTIValidationError
 from app.services.study_store import study_store
 
 from brainseg.constants import DISCLAIMER
 
+mimetypes.add_type("image/webp", ".webp")  # not in the Windows registry everywhere; used by the loader images
+
 app = FastAPI(
-    title="NeuroScope 3D — research prototype",
+    title="Voxels — research prototype",
     description=f"**{DISCLAIMER}**\n\nUpload four co-registered MRI sequences, run the pretrained MONAI SegResNet, "
                 "view suspected tumour regions predicted by the model in 3D and linked slices, and download the "
                 "NIfTI label map (BraTS codes 1 NCR, 2 ED, 4 ET) and a report.",
@@ -60,6 +63,7 @@ app.include_router(upload.router)
 app.include_router(segmentation.router)
 app.include_router(viewer.router)
 app.include_router(backup.router)
+app.include_router(privacy.router)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 
 # Paths for frontend web app
@@ -74,7 +78,7 @@ async def health_check():
     """Health check endpoint verifying backend service status."""
     return {
         "status": "healthy",
-        "service": "NeuroScope 3D",
+        "service": "Voxels",
         "version": "1.0.0",
         "validation_engine": "active",
         "ready_for_uploads": True,
@@ -86,6 +90,7 @@ if (FRONTEND_DIST / "assets").exists():
 
 
 STATIC_INDEX = Path(__file__).resolve().parent / "static" / "index.html"
+STATIC_ANALYSE = Path(__file__).resolve().parent / "static" / "analyse.html"
 
 
 @app.get("/api/about", tags=["System"])
@@ -106,6 +111,12 @@ def about():
         "disclaimer": DISCLAIMER,
         "upload_ttl_hours": round(study_store.ttl_seconds / 3600, 1),
     }
+
+
+@app.get("/analyse", response_class=HTMLResponse, tags=["Web Interface"])
+async def serve_analyse():
+    """Serve the analysis workflow: drop a study, run the model, open the viewer and report."""
+    return FileResponse(str(STATIC_ANALYSE), headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
@@ -130,9 +141,9 @@ async def serve_root():
         """
         <!DOCTYPE html>
         <html>
-        <head><title>NeuroScope 3D</title></head>
+        <head><title>Voxels</title></head>
         <body style="font-family:sans-serif;background:#0b0f19;color:#f9fafb;padding:2rem;">
-            <h1>NeuroScope 3D API is Running</h1>
+            <h1>Voxels API is Running</h1>
             <p>Interactive API documentation is available at <a href="/docs" style="color:#06b6d4;">/docs</a>.</p>
         </body>
         </html>

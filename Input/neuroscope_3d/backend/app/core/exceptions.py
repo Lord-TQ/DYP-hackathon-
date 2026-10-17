@@ -92,7 +92,7 @@ class InvalidDimensionsError(NIfTIValidationError):
         ndim = len(shape)
         msg = (
             f"The uploaded MRI sequence '{modality or filename}' has {ndim} dimensions {shape}. "
-            f"NeuroScope 3D requires exactly 3D MRI volumes (e.g., 240 × 240 × 155). "
+            f"Voxels requires exactly 3D MRI volumes (e.g., 240 × 240 × 155). "
             f"2D slices and 4D time-series/multi-channel volumes cannot be processed directly."
         )
         super().__init__(

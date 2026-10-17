@@ -1,4 +1,4 @@
-# Model card — NeuroScope 3D tumour-region segmentation
+# Model card — Voxels tumour-region segmentation
 
 > Research and teaching prototype. Outputs are **suspected tumour regions predicted by the model** and
 > **estimated volumes**. Not a diagnosis; not clinically validated; not for clinical use.

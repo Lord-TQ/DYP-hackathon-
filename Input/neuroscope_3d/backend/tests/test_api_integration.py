@@ -55,7 +55,7 @@ class TestAPIIntegration:
         assert res.status_code == 200
         data = res.json()
         assert data["status"] == "healthy"
-        assert data["service"] == "NeuroScope 3D"
+        assert data["service"] == "Voxels"
         assert data["ready_for_uploads"] is True
 
     def test_02_single_file_validation_endpoint_valid(self):
