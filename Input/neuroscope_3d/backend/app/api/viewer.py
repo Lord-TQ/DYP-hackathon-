@@ -107,4 +107,4 @@ def report_pdf(study_id: str):
     except NIfTIValidationError as e:
         return _error(e)
     return Response(pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": f'inline; filename="neuroscope_report_{study_id}.pdf"'})
+                    headers={"Content-Disposition": f'inline; filename="voxels_report_{study_id}.pdf"'})

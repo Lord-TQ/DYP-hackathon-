@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Analyse a study · NeuroScope 3D</title>
+  <title>Analyse a study · Voxels</title>
   <meta name="description" content="Research and teaching prototype: suspected tumour regions predicted by a pretrained model on brain MRI, estimated volumes, 3D and linked-slice viewer.">
   <link rel="stylesheet" href="/static/base.css">
   <link rel="stylesheet" href="/static/app.css">
@@ -14,7 +14,7 @@
   </div>
 
   <header class="nav">
-    <a class="wordmark" href="/">Neuro<em>scope</em><sup>3D</sup></a>
+    <a class="wordmark" href="/">Vox<em>els</em></a>
     <ul>
       <li><a href="/analyse" aria-current="page">Analyse</a></li>
       <li><a href="/#method">Method</a></li>
@@ -67,6 +67,72 @@
         </aside>
       </div>
 
+      <div class="four-files" id="four-files">
+        <header class="four-head">
+          <p class="eyebrow">Or: four separate files</p>
+          <h3>One file per sequence</h3>
+          <p>Use this when T1, T1Gd, T2 and FLAIR are stored as separate 3D NIfTI files on the same grid. Put each file in
+            its slot; the expert mask is optional. The same checks run as above, and any problem opens a pop-up.</p>
+        </header>
+        <div class="slots" id="slots">
+          <div class="slot" data-role="T1">
+            <label class="slot-pick">
+              <span class="slot-name">T1</span>
+              <span class="slot-note">native T1-weighted</span>
+              <span class="slot-file"></span>
+              <span class="slot-meta mono"></span>
+              <input type="file" accept=".nii,.gz,.nii.gz" aria-label="Choose the T1 file">
+            </label>
+            <button class="slot-remove" type="button" aria-label="Remove the T1 file" hidden>×</button>
+          </div>
+          <div class="slot" data-role="T1Gd">
+            <label class="slot-pick">
+              <span class="slot-name">T1Gd</span>
+              <span class="slot-note">contrast-enhanced T1 (t1ce)</span>
+              <span class="slot-file"></span>
+              <span class="slot-meta mono"></span>
+              <input type="file" accept=".nii,.gz,.nii.gz" aria-label="Choose the T1Gd file">
+            </label>
+            <button class="slot-remove" type="button" aria-label="Remove the T1Gd file" hidden>×</button>
+          </div>
+          <div class="slot" data-role="T2">
+            <label class="slot-pick">
+              <span class="slot-name">T2</span>
+              <span class="slot-note">T2-weighted</span>
+              <span class="slot-file"></span>
+              <span class="slot-meta mono"></span>
+              <input type="file" accept=".nii,.gz,.nii.gz" aria-label="Choose the T2 file">
+            </label>
+            <button class="slot-remove" type="button" aria-label="Remove the T2 file" hidden>×</button>
+          </div>
+          <div class="slot" data-role="FLAIR">
+            <label class="slot-pick">
+              <span class="slot-name">FLAIR</span>
+              <span class="slot-note">T2-FLAIR</span>
+              <span class="slot-file"></span>
+              <span class="slot-meta mono"></span>
+              <input type="file" accept=".nii,.gz,.nii.gz" aria-label="Choose the FLAIR file">
+            </label>
+            <button class="slot-remove" type="button" aria-label="Remove the FLAIR file" hidden>×</button>
+          </div>
+          <div class="slot" data-role="expert">
+            <label class="slot-pick">
+              <span class="slot-name">Expert mask</span>
+              <span class="slot-note">optional · BraTS codes 1/2/4</span>
+              <span class="slot-file"></span>
+              <span class="slot-meta mono"></span>
+              <input type="file" accept=".nii,.gz,.nii.gz" aria-label="Choose the Expert mask file">
+            </label>
+            <button class="slot-remove" type="button" aria-label="Remove the Expert mask file" hidden>×</button>
+          </div>
+        </div>
+        <p id="four-hint" class="hint" hidden></p>
+        <div class="run-row">
+          <button class="btn" id="four-run" disabled>Run analysis on these four <span class="arr">→</span></button>
+          <button class="btn ghost" id="four-clear" hidden>Clear</button>
+        </div>
+      </div>
+
       <div id="result" class="result" hidden></div>
     </section>
 
@@ -74,7 +140,7 @@
 
   <footer class="foot">
     <div>
-      <a class="wordmark" href="/">Neuro<em>scope</em><sup>3D</sup></a>
+      <a class="wordmark" href="/">Vox<em>els</em></a>
       <p id="disclaimer-full">Research and teaching prototype. Outputs are suspected tumour regions predicted by the model and estimated volumes. Not a diagnosis; not clinically validated; not for clinical use.</p>
     </div>
     <div>

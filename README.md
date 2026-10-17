@@ -1,4 +1,7 @@
-# NeuroScope 3D — brain MRI tumour-region segmentation (research prototype)
+# Voxels — brain MRI tumour-region segmentation (research prototype)
+
+*Voxels* is the product name (previously NeuroScope 3D). Code folders and package names such as
+`Input/neuroscope_3d/` and `neuroscope/` keep their original names.
 
 > **Research and teaching prototype.** Outputs are *suspected tumour regions predicted by the model* and
 > *estimated volumes*. Not a diagnosis; not clinically validated; not for clinical use. Use only public,

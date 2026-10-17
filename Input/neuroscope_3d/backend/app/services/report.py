@@ -268,7 +268,7 @@ def render_html(study: ValidatedStudy) -> str:
 
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width, initial-scale=1">
-<title>NeuroScope 3D report</title>
+<title>Voxels report</title>
 <link rel="stylesheet" href="/static/base.css">
 <style>
 :root {{ --fg:#171614; --muted:#7a7468; --bg:#f2ede3; --line:#c9bfab; --warn:#5a3d06; --warnbg:#f3dfb4; --accent:#c8402a; }}
@@ -292,7 +292,7 @@ img {{ max-width: 100%; border: 1px solid var(--fg); }}
 {_backup_html(m)}
 <p class=toolbar><a href="/api/report/{e(d['study_id'])}.pdf">Download PDF</a><a href="/viewer/{e(d['study_id'])}">Open viewer</a>
 <a href="/api/segmentation/prediction/{e(d['study_id'])}">Prediction NIfTI</a></p>
-<h1>NeuroScope 3D — estimated tumour-region volumes</h1>
+<h1>Voxels — estimated tumour-region volumes</h1>
 <p class=muted>Study {e(d['study_id'])} · report generated {e(d['generated_utc'])}</p>
 <p>Part A describes this case: the suspected tumour regions predicted by the model and their estimated volumes.
 Part B describes how the model performed on other, labelled cases. The two are separate.</p>
@@ -404,7 +404,7 @@ def render_pdf(study: ValidatedStudy) -> bytes:
     agree = m["agreement"] or {}
 
     # ---- page 1: this case
-    head_t = Table([[Paragraph(f"NeuroScope 3D &nbsp;·&nbsp; case {e(case)}", h1),
+    head_t = Table([[Paragraph(f"Voxels &nbsp;·&nbsp; case {e(case)}", h1),
                      Paragraph(f"Report {e(d['generated_utc'][:16].replace('T', ' '))} UTC<br/>Study ref "
                                f"{e(d['study_id'].rsplit('_', 1)[-1][:6])}",
                                style("r", fontSize=7.5, leading=10, textColor=muted, alignment=2))]],
@@ -554,13 +554,13 @@ def render_pdf(study: ValidatedStudy) -> bytes:
         canvas.line(15 * mm, 11 * mm, A4[0] - 15 * mm, 11 * mm)
         canvas.setFont("Helvetica", 6.8)
         canvas.setFillColor(muted)
-        canvas.drawString(15 * mm, 7 * mm, "NeuroScope 3D · research and teaching prototype · not a diagnosis · "
+        canvas.drawString(15 * mm, 7 * mm, "Voxels · research and teaching prototype · not a diagnosis · "
                                            "not for clinical use")
         canvas.drawRightString(A4[0] - 15 * mm, 7 * mm, f"case {case} · page {doc.page}")
         canvas.restoreState()
 
     buf = io.BytesIO()
     SimpleDocTemplate(buf, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=13 * mm,
-                      bottomMargin=16 * mm, title=f"NeuroScope 3D report · case {case}",
-                      author="NeuroScope 3D (fixed template)").build(story, onFirstPage=footer, onLaterPages=footer)
+                      bottomMargin=16 * mm, title=f"Voxels report · case {case}",
+                      author="Voxels (fixed template)").build(story, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()

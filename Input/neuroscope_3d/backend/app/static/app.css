@@ -211,3 +211,30 @@ body {
 .alert-list li { margin: 4px 0; }
 .alert-note { margin: 0; font-size: 13.5px; color: var(--ink-2); border-top: 1px solid var(--rule); padding-top: 10px; }
 .alert-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+
+/* ---------------------------------------------------------------- analyse: four separate files (one slot each) */
+.four-files { margin-top: 44px; padding-top: 26px; border-top: 1px solid var(--ink); }
+.four-head h3 { font: 400 32px/1.05 var(--serif); margin: 6px 0 8px; }
+.four-head p:last-child { margin: 0 0 18px; color: var(--ink-2); font-size: 14px; max-width: 46em; }
+.slots { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.slot { position: relative; }
+.slot-pick { position: relative; display: flex; flex-direction: column; gap: 4px; min-height: 132px; padding: 16px 14px;
+  border: 1.5px dashed var(--ink); background: var(--paper-2); cursor: pointer; transition: background .15s; }
+.slot-pick:hover, .slot.over .slot-pick { background: var(--paper-3); }
+.slot.over .slot-pick { border-style: solid; border-color: var(--accent); }
+.slot.filled .slot-pick { border-style: solid; background: var(--paper); }
+.slot.bad .slot-pick { border-color: var(--accent); }
+.slot-pick:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.slot-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.slot-name { font: 400 26px/1 var(--serif); }
+.slot[data-role="expert"] .slot-name { font-size: 22px; }
+.slot-note { font: 400 11px var(--mono); color: var(--ink-3); }
+.slot-file { margin-top: auto; font-size: 13px; overflow-wrap: anywhere; color: var(--ink-2); }
+.slot.filled .slot-file { color: var(--ink); font-weight: 500; }
+.slot-meta { font-size: 11px; color: var(--ink-3); }
+.slot-meta .bad { color: var(--accent); }
+.slot-remove { position: absolute; top: 6px; right: 8px; z-index: 1; border: 0; background: none; font-size: 20px; line-height: 1;
+  cursor: pointer; color: var(--ink-3); padding: 2px 4px; }
+.slot-remove:hover { color: var(--accent); }
+@media (max-width: 980px) { .slots { grid-template-columns: repeat(2, minmax(0, 1fr)); } .slot[data-role="expert"] { grid-column: 1 / -1; } }
+@media (max-width: 420px) { .slots { grid-template-columns: 1fr; } }

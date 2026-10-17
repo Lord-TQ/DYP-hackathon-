@@ -132,8 +132,8 @@ async function addFiles(fileList) {
   render();
 }
 
-function plan() {
-  const live = state.items.filter((it) => it.role && it.role !== 'ignore');
+function plan(items = state.items) {
+  const live = items.filter((it) => it.role && it.role !== 'ignore');
   const four = live.filter((it) => it.role === 'study4d');
   const seqs = live.filter((it) => SEQS.includes(it.role));
   const experts = live.filter((it) => it.role === 'expert');
@@ -147,7 +147,7 @@ function plan() {
       if (nd !== 3) problems.push(`${n} is ${nd}D (${h.dim.join(' × ')}); ${it.role === 'expert' ? 'the expert mask' : 'each sequence'} must be a 3D volume.`);
     }
   }
-  if (state.items.some((it) => !it.role)) problems.push('Assign a sequence to every file (or mark it “ignore”).');
+  if (items.some((it) => !it.role)) problems.push('Assign a sequence to every file (or mark it “ignore”).');
   if (experts.length > 1) problems.push('Only one expert mask can be attached.');
   if (four.length > 1) problems.push('Drop only one 4-channel study at a time.');
   if (four.length && seqs.length) problems.push('Use either one 4-channel file or four sequence files, not both.');
@@ -246,14 +246,13 @@ function popup({ kind, title, code, items, note, cont }) {
 
 const NOT_RUN = 'Nothing was sent to the model and no result was produced.';
 
-async function run() {
-  const p = plan();
+async function run(p = plan()) {
   if (p.problems.length) {
     popup({ kind: 'refuse', title: 'These files cannot be analysed', code: 'CHECKED_IN_BROWSER', items: p.problems,
             note: `${NOT_RUN} Fix the files listed above and press Run again.` });
     return;
   }
-  state.busy = true; render();
+  state.busy = true; refresh();
   $('#error').hidden = true; $('#result').hidden = true;
   Object.keys(steps).forEach((k) => step(k, ''));
 
@@ -279,7 +278,7 @@ async function run() {
   if (!up.ok) {
     step('checks', 'fail', 'refused');
     showError(up.body.error_code, up.body.message);
-    state.busy = false; render();
+    state.busy = false; refresh();
     popup({ kind: 'refuse', title: 'The server refused this study', code: up.body.error_code || `HTTP ${up.status}`,
             items: [up.body.message || 'The upload could not be processed.'], note: NOT_RUN });
     return;
@@ -294,7 +293,7 @@ async function run() {
       + 'Continue to run the model anyway, or stop here (the upload is deleted automatically within 24 h).',
   }))) {
     step('segment', 'fail', 'stopped');
-    state.busy = false; render(); return;
+    state.busy = false; refresh(); return;
   }
 
   const t2 = performance.now();
@@ -306,7 +305,7 @@ async function run() {
   if (!seg.ok) {
     step('segment', 'fail', 'failed');
     showError(r.error_code || 'SEGMENTATION_FAILED', r.message);
-    state.busy = false; render();
+    state.busy = false; refresh();
     popup({ kind: 'refuse', title: 'Segmentation did not complete', code: r.error_code || 'SEGMENTATION_FAILED',
             items: [r.message || 'The model could not process this study.'], note: 'No result was produced.' });
     return;
@@ -321,7 +320,7 @@ async function run() {
   ]);
   step('finish', 'ok', `${secs(t3)} · total ${secs(t0)}`);
   showResult(sid, r, meta, up.body);
-  state.busy = false; render();
+  state.busy = false; refresh();
 }
 
 function showResult(sid, r, meta, up) {
@@ -362,6 +361,61 @@ function showResult(sid, r, meta, up) {
   el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// ------------------------------------------------------------------ four separate files: one slot per sequence
+// Same checks, run log, result and pop-ups as the drop zone; only the way files are chosen differs.
+const SLOT_ROLES = [...SEQS, 'expert'];
+const slots = {};                                       // role -> { file, head }
+const slotsEl = $('#slots');
+const slotItems = () => SLOT_ROLES.filter((r) => slots[r]).map((r) => ({ ...slots[r], role: r }));
+
+function refresh() { render(); renderSlots(); }
+
+async function setSlot(role, file) {
+  if (!file) return;
+  slots[role] = { file, head: await readHeader(file) };
+  renderSlots();
+}
+
+function renderSlots() {
+  if (!slotsEl) return;
+  slotsEl.querySelectorAll('.slot').forEach((el) => {
+    const s = slots[el.dataset.role], h = s && s.head;
+    el.classList.toggle('filled', !!s);
+    el.classList.toggle('bad', !!(h && h.error));
+    el.querySelector('.slot-file').textContent = s ? s.file.name : (el.dataset.role === 'expert' ? 'optional' : 'drop a file or click');
+    el.querySelector('.slot-meta').innerHTML = !s ? '' : h.error ? `<span class="bad">${esc(h.error)}</span>`
+      : `${h.dim.join(' × ')} &nbsp;·&nbsp; ${fmtMB(s.file.size)}`;
+    el.querySelector('.slot-remove').hidden = !s;
+  });
+  const items = slotItems(), has = items.length > 0, hint = $('#four-hint');
+  $('#four-clear').hidden = !has;
+  hint.hidden = !has;
+  if (has) {
+    const p = plan(items);
+    hint.innerHTML = p.problems.length ? `<span class="bad">${p.problems.map(esc).join(' ')}</span>`
+      : `Ready: T1, T1Gd, T2 and FLAIR${p.expert ? ' + expert mask' : ''}.`;
+  }
+  $('#four-run').disabled = state.busy || !has;
+}
+
+if (slotsEl) {
+  slotsEl.querySelectorAll('.slot').forEach((el) => {
+    const role = el.dataset.role, inp = el.querySelector('input');
+    inp.addEventListener('change', () => { setSlot(role, inp.files[0]); inp.value = ''; });
+    ['dragenter', 'dragover'].forEach((e) => el.addEventListener(e, (ev) => { ev.preventDefault(); el.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach((e) => el.addEventListener(e, () => el.classList.remove('over')));
+    el.addEventListener('drop', (ev) => { ev.preventDefault(); setSlot(role, ev.dataTransfer.files[0]); });
+    el.querySelector('.slot-remove').addEventListener('click', () => { delete slots[role]; renderSlots(); });
+  });
+  $('#four-run').addEventListener('click', () => run(plan(slotItems())));
+  $('#four-clear').addEventListener('click', () => {
+    SLOT_ROLES.forEach((r) => delete slots[r]);
+    $('#error').hidden = true; $('#result').hidden = true;
+    Object.keys(steps).forEach((k) => step(k, '')); renderSlots();
+  });
+  renderSlots();
+}
+
 // ------------------------------------------------------------------ wiring
 const drop = $('#drop'), input = $('#file-input');
 if (drop) {
@@ -369,7 +423,7 @@ if (drop) {
   ['dragenter', 'dragover'].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((e) => drop.addEventListener(e, () => drop.classList.remove('over')));
   drop.addEventListener('drop', (ev) => { ev.preventDefault(); addFiles([...ev.dataTransfer.files]); });
-  $('#run').addEventListener('click', run);
+  $('#run').addEventListener('click', () => run());
   $('#clear').addEventListener('click', () => {
     state.items = []; state.order = [...DECATHLON_ORDER];
     $('#error').hidden = true; $('#result').hidden = true;

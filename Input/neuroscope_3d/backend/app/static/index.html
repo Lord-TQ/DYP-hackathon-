@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NeuroScope 3D</title>
+  <title>Voxels</title>
   <meta name="description" content="Research and teaching prototype: suspected tumour regions predicted by a pretrained model on brain MRI, estimated volumes, 3D and linked-slice viewer.">
   <link rel="stylesheet" href="/static/base.css">
   <link rel="stylesheet" href="/static/app.css">
@@ -14,7 +14,7 @@
   </div>
 
   <header class="nav">
-    <a class="wordmark" href="/">Neuro<em>scope</em><sup>3D</sup></a>
+    <a class="wordmark" href="/">Vox<em>els</em></a>
     <ul>
       <li><a href="/analyse">Analyse</a></li>
       <li><a href="#method">Method</a></li>
@@ -31,7 +31,7 @@
         <p class="eyebrow">Brain MRI &nbsp;/&nbsp; segmentation instrument &nbsp;/&nbsp; built in 24 hours</p>
         <h1>A second look,<br><em>in three dimensions.</em></h1>
         <p class="lede">
-          Drop one MRI study. NeuroScope runs a pretrained MONAI SegResNet over T1, T1Gd, T2 and FLAIR,
+          Drop one MRI study. Voxels runs a pretrained MONAI SegResNet over T1, T1Gd, T2 and FLAIR,
           outlines the <strong>suspected tumour regions predicted by the model</strong>, estimates each in
           millilitres, and lets you walk through them slice by slice and in 3D. It takes under a minute, and the scan
           never leaves this machine.
@@ -149,7 +149,7 @@
       </div>
 
       <ol class="pv-facts">
-        <li><b>Where.</b> Uploads and everything made from them (sequences, label map, surfaces, report data) sit in one folder per study in the server's temporary directory, on the machine running NeuroScope.</li>
+        <li><b>Where.</b> Uploads and everything made from them (sequences, label map, surfaces, report data) sit in one folder per study in the server's temporary directory, on the machine running Voxels.</li>
         <li><b>When.</b> Each study is deleted <span id="pv-ttl">23</span> h after upload. The server checks at startup, on every access and every <span id="pv-sweep">10</span> minutes, so nothing outlives 24 h.</li>
         <li><b>What leaves.</b> No cloud, analytics or AI-service code was found by the repository's leak audit (<span class="mono">scripts/audit_no_leaks.py</span>). The model runs on this machine.</li>
         <li><b>Who can open a study.</b> Only someone holding its link: each study ID is 128 random bits. There are no accounts, so do not share links and upload only public, de-identified research data.</li>
@@ -159,7 +159,7 @@
 
   <footer class="foot">
     <div>
-      <a class="wordmark" href="/">Neuro<em>scope</em><sup>3D</sup></a>
+      <a class="wordmark" href="/">Vox<em>els</em></a>
       <p id="disclaimer-full">Research and teaching prototype. Outputs are suspected tumour regions predicted by the model and estimated volumes. Not a diagnosis; not clinically validated; not for clinical use.</p>
     </div>
     <div>

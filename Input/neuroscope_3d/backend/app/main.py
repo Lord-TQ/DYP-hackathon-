@@ -21,7 +21,7 @@ from app.services.study_store import study_store
 from brainseg.constants import DISCLAIMER
 
 app = FastAPI(
-    title="NeuroScope 3D — research prototype",
+    title="Voxels — research prototype",
     description=f"**{DISCLAIMER}**\n\nUpload four co-registered MRI sequences, run the pretrained MONAI SegResNet, "
                 "view suspected tumour regions predicted by the model in 3D and linked slices, and download the "
                 "NIfTI label map (BraTS codes 1 NCR, 2 ED, 4 ET) and a report.",
@@ -75,7 +75,7 @@ async def health_check():
     """Health check endpoint verifying backend service status."""
     return {
         "status": "healthy",
-        "service": "NeuroScope 3D",
+        "service": "Voxels",
         "version": "1.0.0",
         "validation_engine": "active",
         "ready_for_uploads": True,
@@ -138,9 +138,9 @@ async def serve_root():
         """
         <!DOCTYPE html>
         <html>
-        <head><title>NeuroScope 3D</title></head>
+        <head><title>Voxels</title></head>
         <body style="font-family:sans-serif;background:#0b0f19;color:#f9fafb;padding:2rem;">
-            <h1>NeuroScope 3D API is Running</h1>
+            <h1>Voxels API is Running</h1>
             <p>Interactive API documentation is available at <a href="/docs" style="color:#06b6d4;">/docs</a>.</p>
         </body>
         </html>
