@@ -25,6 +25,12 @@ from app.services.study_store import ValidatedStudy  # noqa: E402
 from brainseg.constants import DISCLAIMER, LIMITATIONS, MODEL_INFO, PREPROCESSING  # noqa: E402
 
 EVALUATION_FILE = REPO_ROOT / "evaluation" / "metrics.json"
+SPLIT_FILE = REPO_ROOT / "evaluation" / "split.json"
+REPORT_METHOD = ("Fixed template (Input/neuroscope_3d/backend/app/services/report.py) filled only with values "
+                 "computed or recorded by this platform; figure drawn with matplotlib from the uploaded FLAIR and "
+                 "the label maps. No generative AI or external service writes, edits or illustrates this report.")
+PATIENT_CAVEAT = ("The Decathlon release has no patient identifiers; each case ID is assumed to be one patient, "
+                  "which cannot be confirmed from the data.")
 LABEL_CMAP = ListedColormap(["none", "#d6452c", "#78a870", "none", "#e8b030"])
 REGION_ORDER = ["NCR", "ED", "ET", "TC", "WT"]
 REGION_DESC = {
@@ -36,6 +42,43 @@ def load_evaluation() -> Optional[Dict[str, Any]]:
     if EVALUATION_FILE.exists():
         return json.loads(EVALUATION_FILE.read_text(encoding="utf-8"))
     return None
+
+
+def load_split() -> Optional[Dict[str, Any]]:
+    if SPLIT_FILE.exists():
+        return json.loads(SPLIT_FILE.read_text(encoding="utf-8"))
+    return None
+
+
+def evaluation_parts(ev, split):
+    """(heading, paragraphs, table rows) for the dataset-level evaluation, shared by HTML and PDF."""
+    if not ev:
+        return ("Part B — dataset-level evaluation", ["Not computed: evaluation/metrics.json is missing. Run "
+                "scripts/evaluate.py on at least 10 labelled cases to fill this section."], None)
+    s = ev["summary"]
+    n = ev["n_cases"]
+    trained = (split or {}).get("training_or_tuning_cases_used_by_us")
+    trained_txt = ("none (the pretrained model was used as-is; no training or tuning by us)" if trained == []
+                   else ", ".join(trained) if trained else "not provided")
+    paras = [
+        "These numbers describe the model on other cases, not the case above.",
+        f"Data: {ev['dataset']}. Split by case ID (patient-level): {n} evaluation cases: {', '.join(ev['case_ids'])}. "
+        f"Cases we trained or tuned on: {trained_txt}. {PATIENT_CAVEAT}",
+        f"Evaluation run {ev.get('generated_utc', 'not provided')}, code commit "
+        f"{ev.get('code_commit', 'not provided')} (as recorded in evaluation/metrics.json).",
+    ]
+    rows = [["Region", "Dice mean ± SD (n)", "Sensitivity mean ± SD (n)", "HD95 median (mm)"]]
+    for r in ("WT", "TC", "ET"):
+        n_sens = n - int(s[r].get("sensitivity_undefined_cases", 0) or 0)
+        rows.append([r, f"{s[r]['dice_mean']:.3f} ± {s[r]['dice_sd']:.3f} ({n})",
+                     f"{_fmt(s[r]['sensitivity_mean'])} ± {_fmt(s[r]['sensitivity_sd'])} ({n_sens})",
+                     _fmt(s[r]["hd95_median_mm"], 1)])
+    undefined = [r for r in ("WT", "TC", "ET") if s[r].get("sensitivity_undefined_cases")]
+    if undefined:
+        paras.append("Sensitivity is undefined when the expert marked no voxels of a region; such cases are left "
+                     "out of that region's mean (" + ", ".join(f"{r}: {s[r]['sensitivity_undefined_cases']}"
+                                                         for r in undefined) + ").")
+    return (f"Part B — dataset-level evaluation on {n} labelled cases we did not train or tune on", paras, rows)
 
 
 # ---------------------------------------------------------------- figure
@@ -102,6 +145,7 @@ def report_data(study: ValidatedStudy) -> Dict[str, Any]:
         "meta": m,
         "inputs": rec.get("provenance", {}).get("inputs", {}),
         "evaluation": load_evaluation(),
+        "split": load_split(),
         "limitations": LIMITATIONS,
         "model": MODEL_INFO,
         "preprocessing": PREPROCESSING,
@@ -156,7 +200,7 @@ def _trust_html(m) -> str:
     blocks = _trust_rows(m)
     if not blocks:
         return ""
-    html_out = "<h2>How much to trust it</h2>"
+    html_out = "<h2>How much to trust it (this case)</h2>"
     for para, rows in blocks:
         html_out += (f"<p>{html.escape(para)}</p><table><tr>" + "".join(f"<th>{html.escape(h)}</th>" for h in rows[0])
                      + "</tr>" + "".join("<tr>" + "".join(f"<td>{html.escape(str(c))}</td>" for c in r) + "</tr>"
@@ -205,22 +249,14 @@ def render_html(study: ValidatedStudy) -> str:
         )
 
     ev = d["evaluation"]
+    ev_head, ev_paras, ev_rows = evaluation_parts(ev, d["split"])
+    evaluation = f"<h2>{e(ev_head)}</h2>" + "".join(f"<p>{e(p)}</p>" for p in ev_paras)
+    if ev_rows:
+        evaluation += ("<table><tr>" + "".join(f"<th>{e(h)}</th>" for h in ev_rows[0]) + "</tr>"
+                       + "".join("<tr>" + "".join(f"<td>{e(c)}</td>" for c in r) + "</tr>" for r in ev_rows[1:])
+                       + "</table>")
     if ev:
-        s = ev["summary"]
-        rows = "".join(
-            f"<tr><td>{r}</td><td>{s[r]['dice_mean']:.3f} ± {s[r]['dice_sd']:.3f}</td>"
-            f"<td>{_fmt(s[r]['sensitivity_mean'])} ± {_fmt(s[r]['sensitivity_sd'])}</td>"
-            f"<td>{_fmt(s[r]['hd95_median_mm'], 1)}</td></tr>" for r in ("WT", "TC", "ET")
-        )
-        evaluation = (
-            f"<h2>Model evaluation ({ev['n_cases']} held-out labelled cases)</h2>"
-            f"<p>{e(ev['dataset'])}. Cases: {e(', '.join(ev['case_ids']))}.</p>"
-            "<table><tr><th>Region</th><th>Dice mean ± SD</th><th>Sensitivity mean ± SD</th><th>HD95 median (mm)</th></tr>"
-            + rows + "</table>"
-            f"<p class=warn><b>Overlap disclosure:</b> {e(ev['overlap_disclosure'])}</p>"
-        )
-    else:
-        evaluation = "<h2>Model evaluation</h2><p class=warn>Evaluation has not been run (evaluation/metrics.json missing).</p>"
+        evaluation += f"<p class=warn><b>Overlap disclosure:</b> {e(ev['overlap_disclosure'])}</p>"
 
     warnings = m["suitability"].get("warnings", [])
     warn_html = ("<ul>" + "".join(f"<li>{e(w)}</li>" for w in warnings) + "</ul>") if warnings else "<p>None.</p>"
@@ -258,15 +294,17 @@ img {{ max-width: 100%; border: 1px solid var(--fg); }}
 <a href="/api/segmentation/prediction/{e(d['study_id'])}">Prediction NIfTI</a></p>
 <h1>NeuroScope 3D — estimated tumour-region volumes</h1>
 <p class=muted>Study {e(d['study_id'])} · report generated {e(d['generated_utc'])}</p>
+<p>Part A describes this case: the suspected tumour regions predicted by the model and their estimated volumes.
+Part B describes how the model performed on other, labelled cases. The two are separate.</p>
 
-<h2>Input</h2>
+<h2>Part A — this case: input</h2>
 <table><tr><th>Sequence</th><th>File</th><th>SHA-256</th></tr>{inputs}</table>
 <p>Grid {m['original_shape']} voxels, spacing {', '.join(f'{s:.3f}' for s in sp)} mm, orientation {e(m['original_orientation'])}.
 Expert mask: {'supplied' if m['has_expert'] else 'not supplied'}.</p>
 {f"<p class=mono>{e(_source_text(m))}</p>" if _source_text(m) else ""}
 <h3>Suitability warnings</h3>{warn_html}
 
-<h2>Estimated volumes of suspected regions predicted by the model</h2>
+<h2>This case — estimated volumes of suspected tumour regions predicted by the model</h2>
 <p><b>Formula:</b> V = N × (Δx × Δy × Δz) = N × ({sp[0]:.3f} × {sp[1]:.3f} × {sp[2]:.3f}) mm³ = N × {vox:.3f} mm³;
 &nbsp; mL = mm³ / 1000 (1 mL = 1,000 mm³). N is the number of voxels with the region's BraTS codes.</p>
 <table><tr><th>Region</th><th>Model voxels N</th><th>Model mm³</th><th>Model mL</th>{expert_cols}</tr>{vol_rows()}</table>
@@ -284,6 +322,7 @@ Expert mask: {'supplied' if m['has_expert'] else 'not supplied'}.</p>
 <tr><td>Code commit</td><td class=mono>{e(str(prov.get('code_commit', '—')))}</td></tr>
 <tr><td>Inference timestamp (UTC)</td><td>{e(str(prov.get('timestamp_utc', '—')))}</td></tr>
 <tr><td>Device / inference time</td><td>{e(str(prov.get('device', '—')))} / {e(str(prov.get('inference_seconds', '—')))} s</td></tr>
+<tr><td>Report text and figure</td><td>{e(REPORT_METHOD)}</td></tr>
 </table>
 
 <h2>Limitations</h2><ul>{''.join(f'<li>{e(x)}</li>' for x in LIMITATIONS)}</ul>
@@ -327,9 +366,12 @@ def render_pdf(study: ValidatedStudy) -> bytes:
             borderPadding=4, fontName="Helvetica-Bold")), Spacer(1, 6)]
     story += [
              Paragraph("NeuroScope 3D — estimated tumour-region volumes", ss["Title"]),
-             Paragraph(f"Study {e(d['study_id'])} · generated {e(d['generated_utc'])}", small)]
+             Paragraph(f"Study {e(d['study_id'])} · generated {e(d['generated_utc'])}", small),
+             Paragraph("Part A describes this case: the suspected tumour regions predicted by the model and their "
+                       "estimated volumes. Part B describes how the model performed on other, labelled cases. "
+                       "The two are separate.", body)]
 
-    story += [Paragraph("Input", h2), table(
+    story += [Paragraph("Part A — this case: input", h2), table(
         [["Sequence", "File", "SHA-256"]]
         + [[k, Paragraph(e(v["file"]), small), Paragraph(v["sha256"], small)] for k, v in d["inputs"].items()],
         [20 * mm, 55 * mm, 105 * mm])]
@@ -341,7 +383,7 @@ def render_pdf(study: ValidatedStudy) -> bytes:
     warnings = m["suitability"].get("warnings", [])
     story.append(Paragraph("<b>Suitability warnings:</b> " + (" ".join(e(w) for w in warnings) if warnings else "none."), body))
 
-    story.append(Paragraph("Estimated volumes of suspected regions predicted by the model", h2))
+    story.append(Paragraph("This case — estimated volumes of suspected tumour regions predicted by the model", h2))
     story.append(Paragraph(
         f"<b>Formula:</b> V = N × (Δx × Δy × Δz) = N × ({sp[0]:.3f} × {sp[1]:.3f} × {sp[2]:.3f}) mm³ = N × {vox:.3f} mm³; "
         "mL = mm³ / 1000 (1 mL = 1,000 mm³).", body))
@@ -369,22 +411,18 @@ def render_pdf(study: ValidatedStudy) -> bytes:
 
     trust = _trust_rows(m)
     if trust:
-        story.append(Paragraph("How much to trust it", h2))
+        story.append(Paragraph("How much to trust it (this case)", h2))
         for para, rows in trust:
             story += [Paragraph(e(para), body), table(rows), Spacer(1, 4)]
 
     ev = d["evaluation"]
-    story.append(Paragraph(f"Model evaluation ({ev['n_cases']} held-out labelled cases)" if ev else "Model evaluation", h2))
+    ev_head, ev_paras, ev_rows = evaluation_parts(ev, d["split"])
+    story.append(Paragraph(e(ev_head), h2))
+    story += [Paragraph(e(p), small) for p in ev_paras]
+    if ev_rows:
+        story.append(table(ev_rows))
     if ev:
-        s = ev["summary"]
-        story.append(Paragraph(f"{e(ev['dataset'])}. Cases: {e(', '.join(ev['case_ids']))}.", small))
-        story.append(table([["Region", "Dice mean ± SD", "Sensitivity mean ± SD", "HD95 median (mm)"]] + [
-            [r, f"{s[r]['dice_mean']:.3f} ± {s[r]['dice_sd']:.3f}",
-             f"{_fmt(s[r]['sensitivity_mean'])} ± {_fmt(s[r]['sensitivity_sd'])}", _fmt(s[r]["hd95_median_mm"], 1)]
-            for r in ("WT", "TC", "ET")]))
         story.append(Paragraph("<b>Overlap disclosure:</b> " + e(ev["overlap_disclosure"]), body))
-    else:
-        story.append(Paragraph("Evaluation has not been run.", body))
 
     prov = m["provenance"] or {}
     story.append(Paragraph("Provenance", h2))
@@ -396,6 +434,7 @@ def render_pdf(study: ValidatedStudy) -> bytes:
         ("Code commit", prov.get("code_commit", "—")),
         ("Inference timestamp (UTC)", prov.get("timestamp_utc", "—")),
         ("Device / inference time", f"{prov.get('device', '—')} / {prov.get('inference_seconds', '—')} s"),
+        ("Report text and figure", REPORT_METHOD),
     )], [40 * mm, 140 * mm]))
 
     story.append(Paragraph("Limitations", h2))
