@@ -502,8 +502,80 @@ function init3D() {
     const hit = ray.intersectObjects(targets, false)[0];
     if (hit) setCross(mv(S.Ainv, [hit.point.x, hit.point.y, hit.point.z, 1]));
   });
+  initHover3D(el);
 
   (function loop() { requestAnimationFrame(loop); T.controls.update(); T.renderer.render(T.scene, T.camera); })();
+}
+
+// ------------------------------------------------------------------ 3D hover: what is under the pointer
+// Tumour surfaces win over the translucent brain outline in front of them. Position is described from the scan's
+// own RAS coordinates relative to the centre of the brain outline (no atlas, so no lobe names).
+const REGION_INFO = {
+  NCR: { name: 'Necrotic / non-enhancing core', code: 1 },
+  ED: { name: 'Oedema', code: 2 },
+  ET: { name: 'Enhancing tumour', code: 4 },
+};
+
+function describePosition(p) {
+  const c = T.center, h = T.half;
+  if (!c || !h) return '';
+  const part = (v, mid, half, plus, minus) => (Math.abs(v - mid) < half * 0.12 ? null : v > mid ? plus : minus);
+  const lr = part(p.x, c.x, h.x, 'right', 'left'), ap = part(p.y, c.y, h.y, 'front', 'back'),
+    si = part(p.z, c.z, h.z, 'upper', 'lower');
+  const side = lr ? `patient's ${lr} side` : 'near the midline';
+  return [side, ap ? `${ap} half` : 'middle (front–back)', si ? `${si} half` : 'mid-height'].join(' · ');
+}
+
+function hoverHTML(mesh, p) {
+  const u = mesh.userData, where = describePosition(p), mm = `x ${fmt(p.x)}, y ${fmt(p.y)}, z ${fmt(p.z)} mm`;
+  if (u.key === 'brain') {
+    return `<b>Brain outline</b><span>Surface of the scanned brain (from the MRI, not an atlas)</span>
+      <span>${where}</span><span class="mm">${mm}</span>`;
+  }
+  const info = REGION_INFO[u.region], src = u.source === 'expert' ? 'expert' : 'model';
+  const vols = S.meta?.volumes?.[src], v = vols?.[u.region], wt = vols?.WT;
+  const share = v && wt && wt.mL > 0 ? ` · ${((v.mL / wt.mL) * 100).toFixed(0)}% of WT` : '';
+  const who = src === 'expert' ? 'Expert mask' : 'Suspected region predicted by the model';
+  return `<b>${u.region} · ${info.name}</b><span>${who} · BraTS code ${info.code}</span>
+    ${v ? `<span>${v.mL.toFixed(2)} mL${share} · ${v.voxels.toLocaleString()} voxels</span>` : ''}
+    <span>${where}</span><span class="mm">${mm}</span>
+    <span class="dim">Estimate, not a diagnosis</span>`;
+}
+
+function initHover3D(el) {
+  const tip = document.createElement('div');
+  tip.className = 'hover3d'; tip.hidden = true; tip.setAttribute('role', 'status');
+  el.parentElement.append(tip);
+  const canvas = T.renderer.domElement, ray = new THREE.Raycaster();
+  let pending = null, lit = null;
+  const light = (m) => {
+    if (lit === m) return;
+    if (lit) lit.material.emissive.setHex(0x000000);
+    lit = m; if (m) m.material.emissive.setHex(m.userData.key === 'brain' ? 0x1a1814 : 0x3a3020);
+  };
+  const clear = () => { tip.hidden = true; light(null); canvas.style.cursor = ''; };
+  canvas.addEventListener('pointermove', (e) => {
+    if (e.buttons) { clear(); return; }                     // rotating / panning
+    pending = e;
+    requestAnimationFrame(() => {
+      if (!pending) return;
+      const ev = pending; pending = null;
+      const r = canvas.getBoundingClientRect();
+      ray.setFromCamera(new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1), T.camera);
+      const hits = ray.intersectObjects(Object.values(T.meshes).filter((m) => m.visible), false);
+      const hit = hits.find((h) => h.object.userData.key !== 'brain') || hits[0];
+      if (!hit) { clear(); return; }
+      light(hit.object);
+      tip.innerHTML = hoverHTML(hit.object, hit.point);
+      tip.hidden = false; canvas.style.cursor = 'help';
+      const pr = el.parentElement.getBoundingClientRect(), x = ev.clientX - pr.left, y = ev.clientY - pr.top;
+      const left = x + 16 + tip.offsetWidth > pr.width ? x - tip.offsetWidth - 12 : x + 16;
+      tip.style.left = `${Math.max(4, left)}px`;
+      tip.style.top = `${Math.max(4, Math.min(y + 14, pr.height - tip.offsetHeight - 4))}px`;
+    });
+  });
+  canvas.addEventListener('pointerleave', clear);
+  canvas.addEventListener('pointerdown', clear);
 }
 
 function b64(s, Type) { const bin = atob(s), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new Type(u8.buffer); }
@@ -529,6 +601,7 @@ function buildMeshes(data) {
     const mat = new THREE.MeshPhongMaterial({ color: d.color, transparent: true, opacity: d.opacity, side: THREE.DoubleSide,
       depthWrite: !isBrain && d.opacity > 0.6, shininess: 25 });
     const mesh = new THREE.Mesh(g, mat); mesh.renderOrder = isBrain ? 5 : 1;
+    mesh.userData = { key, source: d.source, region: key.split('_')[1] };
     mesh.visible = d.source !== 'expert';
     T.scene.add(mesh); T.meshes[key] = mesh;
   }
@@ -541,7 +614,7 @@ function frameCamera() {
   const ref = T.meshes.brain || Object.values(T.meshes)[0];
   if (ref) box.setFromObject(ref); else box.setFromPoints([new THREE.Vector3(...toWorld([0, 0, 0])), new THREE.Vector3(...toWorld([S.X, S.Y, S.Z]))]);
   const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3()), r = size.length() / 2;
-  T.center = c; T.radius = r;
+  T.center = c; T.radius = r; T.half = size.clone().multiplyScalar(0.5);
   T.controls.target.copy(c);
   T.camera.position.set(c.x - r * 0.9, c.y + r * 2.2, c.z + r * 0.9); // anterior-left-superior view
   T.camera.near = r / 50; T.camera.far = r * 20; T.camera.updateProjectionMatrix();
