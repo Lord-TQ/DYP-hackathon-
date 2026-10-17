@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-10-16T20:18:23+00:00",
+  "generated_utc": "2026-10-17T00:18:40+00:00",
   "dataset": "Medical Segmentation Decathlon Task01_BrainTumour (labelled training list), labels converted to BraTS codes",
   "n_cases": 20,
   "case_ids": [
@@ -85,7 +85,7 @@
           "ref_voxels": 4678
         }
       },
-      "seconds": 7.59,
+      "seconds": 6.55,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_038": {
@@ -112,7 +112,7 @@
           "ref_voxels": 81453
         }
       },
-      "seconds": 8.93,
+      "seconds": 6.18,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_048": {
@@ -139,7 +139,7 @@
           "ref_voxels": 32104
         }
       },
-      "seconds": 10.41,
+      "seconds": 6.21,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_084": {
@@ -166,7 +166,7 @@
           "ref_voxels": 6402
         }
       },
-      "seconds": 9.82,
+      "seconds": 5.9,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_086": {
@@ -193,7 +193,7 @@
           "ref_voxels": 7361
         }
       },
-      "seconds": 10.26,
+      "seconds": 6.23,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_145": {
@@ -220,7 +220,7 @@
           "ref_voxels": 33150
         }
       },
-      "seconds": 10.1,
+      "seconds": 6.22,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_169": {
@@ -247,7 +247,7 @@
           "ref_voxels": 26
         }
       },
-      "seconds": 10.22,
+      "seconds": 6.16,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_172": {
@@ -274,7 +274,7 @@
           "ref_voxels": 35681
         }
       },
-      "seconds": 10.32,
+      "seconds": 6.24,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_175": {
@@ -301,7 +301,7 @@
           "ref_voxels": 0
         }
       },
-      "seconds": 7.37,
+      "seconds": 4.61,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_220": {
@@ -328,7 +328,7 @@
           "ref_voxels": 2768
         }
       },
-      "seconds": 10.07,
+      "seconds": 6.09,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_300": {
@@ -355,7 +355,7 @@
           "ref_voxels": 24947
         }
       },
-      "seconds": 10.22,
+      "seconds": 6.31,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_305": {
@@ -382,7 +382,7 @@
           "ref_voxels": 5774
         }
       },
-      "seconds": 10.14,
+      "seconds": 6.15,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_315": {
@@ -409,7 +409,7 @@
           "ref_voxels": 3003
         }
       },
-      "seconds": 10.0,
+      "seconds": 6.1,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_337": {
@@ -436,7 +436,7 @@
           "ref_voxels": 2624
         }
       },
-      "seconds": 9.72,
+      "seconds": 6.19,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_346": {
@@ -463,7 +463,7 @@
           "ref_voxels": 10897
         }
       },
-      "seconds": 9.83,
+      "seconds": 6.26,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_377": {
@@ -490,7 +490,7 @@
           "ref_voxels": 7167
         }
       },
-      "seconds": 9.67,
+      "seconds": 6.1,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_395": {
@@ -517,7 +517,7 @@
           "ref_voxels": 35019
         }
       },
-      "seconds": 9.93,
+      "seconds": 6.12,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_397": {
@@ -544,7 +544,7 @@
           "ref_voxels": 36345
         }
       },
-      "seconds": 10.25,
+      "seconds": 6.28,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_413": {
@@ -571,7 +571,7 @@
           "ref_voxels": 4439
         }
       },
-      "seconds": 10.13,
+      "seconds": 6.16,
       "device": "cuda roi=(240, 240, 160)"
     },
     "BRATS_433": {
@@ -598,7 +598,7 @@
           "ref_voxels": 38724
         }
       },
-      "seconds": 9.79,
+      "seconds": 6.18,
       "device": "cuda roi=(240, 240, 160)"
     }
   },
@@ -614,8 +614,8 @@
     "training_data": "BraTS 2018 (285 cases; bundle authors' own split)",
     "source": "https://huggingface.co/MONAI/brats_mri_segmentation"
   },
-  "preprocessing": "Stack sequences as [T1Gd, T1, T2, FLAIR]; reorient to RAS; resample to 1 mm isotropic (bilinear); z-score intensity normalisation per channel over non-zero voxels; sliding-window inference with AMP; sigmoid; invert resampling/orientation back to the input grid (bilinear on probabilities); threshold 0.5; TC/WT/ET channels -> BraTS codes (ET=4, TC without ET=1, WT without TC=2).",
-  "code_commit": "e7caed2ea7fa4fb1423e0ffb7e19941523e909d6",
+  "preprocessing": "Stack sequences as [T1Gd, T1, T2, FLAIR]; reorient to RAS; resample to 1 mm isotropic (bilinear); z-score intensity normalisation per channel over non-zero voxels; sliding-window inference with AMP; sigmoid; invert resampling/orientation back to the input grid (bilinear on probabilities); threshold 0.5; TC/WT/ET channels -> BraTS codes (ET=4, TC without ET=1, WT without TC=2). Uncertainty: 3 extra passes on the input mirrored along each axis (label map from the plain pass).",
+  "code_commit": "db28f88841d639b391be0fc5f42e00a5444b1bfb",
   "overlap_disclosure": "We did not train or fine-tune the model, so none of these cases were used by us for training or tuning. However, the pretrained MONAI model was trained on BraTS 2018, and Decathlon Task01 is built from BraTS 2016 and 2017 cases, which BraTS 2018 largely re-uses. Decathlon renamed the cases, so we cannot tell which evaluation cases the model saw during its training; most probably overlap. These metrics are therefore likely optimistic and are not an independent held-out estimate.",
   "split_note": "Patient-wise split: Decathlon Task01 provides one multi-sequence study per subject (BRATS_xxx), so each case ID is one patient. Evaluation cases were sampled at random (fixed seed) from the labelled training list. Our training/fine-tuning set is empty (pretrained model used as-is). Judge-provided cases are never used for training or tuning and uploads are deleted within 24 h."
 }

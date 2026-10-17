@@ -1,6 +1,6 @@
 # Evaluation — 20 held-out labelled cases
 
-Dataset: Medical Segmentation Decathlon Task01_BrainTumour (labelled training list), labels converted to BraTS codes. Generated 2026-10-16T20:18:23+00:00, code e7caed2ea7fa4fb1423e0ffb7e19941523e909d6.
+Dataset: Medical Segmentation Decathlon Task01_BrainTumour (labelled training list), labels converted to BraTS codes. Generated 2026-10-17T00:18:40+00:00, code db28f88841d639b391be0fc5f42e00a5444b1bfb.
 
 | Region | Dice mean ± SD | Dice median | Sensitivity mean ± SD | HD95 median (mm) |
 |---|---|---|---|---|
